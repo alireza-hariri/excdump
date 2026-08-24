@@ -168,7 +168,7 @@ from excdump import configure
 configure(store_dir="/var/log/exception_dumps", max_dumps_per_path=500)
 ```
 
-Every field also reads `EXC_DUMPER_<NAME>` from the environment, so a deployment
+Every field also reads `EXCDUMP_<NAME>` from the environment, so a deployment
 can tune capture without touching code. A malformed value is ignored rather than
 raised — a bad environment variable must not stop an app from starting.
 

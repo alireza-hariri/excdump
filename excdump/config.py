@@ -1,7 +1,7 @@
 """Process-wide capture settings and the serializer selection.
 
 Everything here is read at capture time, so a deployment configures once --
-through :func:`configure`, or ``EXC_DUMPER_*`` in the environment -- and the
+through :func:`configure`, or ``EXCDUMP_*`` in the environment -- and the
 rest of the package needs no arguments.
 """
 
@@ -29,14 +29,14 @@ SERIALIZERS: Dict[SerializerName, ModuleType] = {
 
 
 #: Environment overrides, so a deployment can tune capture without code changes.
-ENV_PREFIX = "EXC_DUMPER_"
+ENV_PREFIX = "EXCDUMP_"
 
 
 T = TypeVar("T")
 
 
 def _env(name: str, default: T, cast: Callable[[str], T] = str) -> T:
-    """Read ``EXC_DUMPER_<name>``, falling back to ``default`` if unusable.
+    """Read ``EXCDUMP_<name>``, falling back to ``default`` if unusable.
 
     A malformed environment variable must not stop the application from
     starting, so a bad value is ignored rather than raised.

@@ -220,7 +220,7 @@ id prefix, a path id (opens that path's newest dump), or no argument at all
 
 Options:
   --trace-id <id> Trace id to inspect, when a flag reads better than a positional
-  --store <dir>   Dump store to use (default: $EXC_DUMPER_DIR or ./.exception_dumps)
+  --store <dir>   Dump store to use (default: $EXCDUMP_DIR or ./.exception_dumps)
   --pickle        Write dumps with strict pickle instead of the default "auto"
                   (per-value pickle, dill only where pickle fails; demo only)
   --plain         Force the readline inspector instead of the TUI
