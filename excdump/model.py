@@ -107,12 +107,18 @@ class ExceptionDump:
         created_at: float = 0.0,
         metadata: Optional[Dict[str, Any]] = None,
         dill_blob: Optional[bytes] = None,
+        dill_blob_id: Optional[str] = None,
     ):
         self.exceptions = exceptions
         self.sources = sources
         #: One dill stream holding the values plain pickle could not carry;
-        #: frames point into it with :class:`_DillRef`.
+        #: frames point into it with :class:`_DillRef`. Emptied by the store
+        #: when the stream is written to the path's shared sidecar instead --
+        #: every dump of a path captures the same functions and classes, so
+        #: that stream is usually byte-identical across all of them.
         self.dill_blob = dill_blob
+        #: Hash naming this dump's stream in the sidecar, when it lives there.
+        self.dill_blob_id = dill_blob_id
         #: Identifier returned by :func:`dump_exception`; also the file name.
         self.trace_id = trace_id
         #: ``[(filename, lineno), ...]`` of the handled traceback; the identity
@@ -132,7 +138,7 @@ def _normalize_dump(dump: Any) -> ExceptionDump:
     """Accept dumps written by older versions that had no chain or store."""
     for name, default in (
         ("sources", None), ("trace_id", ""), ("path", []), ("created_at", 0.0),
-        ("metadata", {}), ("dill_blob", None),
+        ("metadata", {}), ("dill_blob", None), ("dill_blob_id", None),
     ):
         if not hasattr(dump, name):
             setattr(dump, name, default)

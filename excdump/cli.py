@@ -1,7 +1,7 @@
 """The command line and the plain readline inspector.
 
 ``inspect`` opens a dump, ``list`` shows what the store holds, ``gc`` reclaims
-unreferenced source blobs, and ``demo`` writes one so there is something to
+unreferenced sidecar blobs, and ``demo`` writes one so there is something to
 look at.
 """
 
@@ -228,10 +228,11 @@ Options:
                   (per-value pickle, dill only where pickle fails; demo only)
   --plain         Force the readline inspector instead of the TUI
 
-``gc`` drops source blobs no surviving dump refers to. Retention deletes dumps
-but leaves their source behind, since working out what is still referenced
-means reading every remaining dump -- too much work to do while capturing an
-exception. Blobs only pile up when a captured file changes without moving any
+``gc`` drops sidecar blobs -- captured source, and the shared dill streams the
+dumps of a path point at -- that no surviving dump refers to. Retention deletes
+dumps but leaves those behind, since working out what is still referenced means
+reading every remaining dump: too much work to do while capturing an exception.
+Blobs only pile up when the captured file or code changes without moving any
 line of the traceback, so this is rarely urgent.
 """
 
@@ -302,18 +303,21 @@ def _demo() -> int:
 
 
 def gc_command(store: DumpStore, pid: Optional[str] = None) -> int:
-    """Drop source blobs that no surviving dump of a path still references."""
+    """Drop sidecar blobs that no surviving dump of a path still references."""
     targets = [pid] if pid else store.path_ids()
     if not targets:
         print("No dumps found.")
         return 0
     total = 0
     for target in targets:
-        removed = store.gc_sources(target)
-        total += len(removed)
-        if removed:
-            print(f"{target}: dropped {len(removed)} unreferenced source blob(s)")
-    print(f"Reclaimed {total} source blob(s) across {len(targets)} path(s).")
+        for kind, removed in (
+            ("source", store.gc_sources(target)),
+            ("value", store.gc_values(target)),
+        ):
+            total += len(removed)
+            if removed:
+                print(f"{target}: dropped {len(removed)} unreferenced {kind} blob(s)")
+    print(f"Reclaimed {total} blob(s) across {len(targets)} path(s).")
     return 0
 
 

@@ -28,7 +28,11 @@ In production, capture is configured once and then needs no arguments::
 Dumps are filed by *exception path* -- the ``(filename, lineno)`` list of the
 traceback -- and each path keeps only its most recent
 ``CONFIG.max_dumps_per_path`` dumps, so a hot failure loop cannot fill the disk
-and cannot push other, rarer failures out of the store.
+and cannot push other, rarer failures out of the store. What those dumps have
+in common -- the text of the files they captured, and the dill stream carrying
+the functions and classes pickle could not -- is stored once for the path and
+referenced by hash, so repeats of one failure cost little more than the values
+that actually differ.
 
 The implementation is split by responsibility -- :mod:`~excdump.config`,
 :mod:`~excdump.paths`, :mod:`~excdump.model`, :mod:`~excdump.sources`,

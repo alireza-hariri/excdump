@@ -5,6 +5,7 @@ write into one store without coordination.
 """
 
 import gzip
+import hashlib
 import json
 import os
 import pickle
@@ -19,6 +20,8 @@ from .paths import (
     PATH_META,
     SOURCE_DIR,
     SOURCE_SUFFIX,
+    VALUE_DIR,
+    VALUE_SUFFIX,
     _silent_remove,
     trace_path_id,
 )
@@ -31,13 +34,14 @@ class DumpStore:
 
         <root>/<path_id>/path.json          the (filename, lineno) list, for humans
         <root>/<path_id>/sources/<hash>.json.gz   full text of one captured file
+        <root>/<path_id>/values/<hash>.dill.gz    one shared dill stream
         <root>/<path_id>/<trace_id>.dump
 
     Nothing is ever read to decide where a dump goes, so concurrent processes
-    can write into the same store without coordination. Source blobs are named
+    can write into the same store without coordination. Sidecar blobs are named
     by the hash of their contents for the same reason: two processes writing
-    the same file's text write the same bytes to the same name, and a file
-    edited between two dumps of one path simply lands in a second blob.
+    the same bytes write them to the same name, and a file edited between two
+    dumps of one path simply lands in a second blob.
     """
 
     def __init__(self, root: Optional[str] = None, max_per_path: Optional[int] = None):
@@ -60,6 +64,7 @@ class DumpStore:
         os.makedirs(directory, exist_ok=True)
         self._write_path_meta(directory, dump)
         self.write_sources(directory, dump)
+        inline_blob = self.write_values(directory, dump)
 
         target = os.path.join(directory, dump.trace_id + DUMP_SUFFIX)
         # Write to a temporary name first: a reader (or a pruning peer) must
@@ -75,9 +80,47 @@ class DumpStore:
         except BaseException:
             _silent_remove(temporary)
             raise
+        finally:
+            # The caller handed us a live object; give its stream back.
+            if inline_blob is not None:
+                dump.dill_blob = inline_blob
 
         self.prune(trace_path_id(dump.trace_id))
         return target
+
+    def write_values(self, directory: str, dump: ExceptionDump) -> Optional[bytes]:
+        """Move ``dump``'s dill stream into the path's shared sidecar.
+
+        Every dump of one exception path captures the same functions, classes
+        and closures, so the stream dill produces for them is normally
+        byte-identical from dump to dump -- and it is both the largest and the
+        least compressible part of a dump. Writing it once per path and naming
+        it by hash means a failure that fires a thousand times stores it once.
+
+        Returns the stream so :meth:`write` can put it back on the object;
+        leaves it in place (and returns ``None``) if the sidecar cannot be
+        written, since a self-contained dump beats no dump at all.
+        """
+        blob = getattr(dump, "dill_blob", None)
+        if not blob:
+            return None
+        digest = hashlib.sha256(blob).hexdigest()[:32]
+        blob_dir = os.path.join(directory, VALUE_DIR)
+        target = os.path.join(blob_dir, digest + VALUE_SUFFIX)
+        if not os.path.exists(target):
+            try:
+                os.makedirs(blob_dir, exist_ok=True)
+                temporary = f"{target}.{os.getpid()}.part"
+                with gzip.open(temporary, "wb", compresslevel=9) as handle:
+                    handle.write(blob)
+                os.replace(temporary, target)
+            except OSError:
+                _silent_remove(f"{target}.{os.getpid()}.part")
+                return None
+        dump.dill_blob_id = digest
+        dump.dill_blob = None
+        return blob
+
 
     def write_sources(self, directory: str, dump: ExceptionDump) -> None:
         """Write each captured file's full text as a content-addressed blob.
@@ -139,8 +182,9 @@ class DumpStore:
             if _silent_remove(target):
                 removed.append(trace_id)
         if removed and not self.dump_ids(pid):
-            # Last dump of the path is gone; nothing can reference its source.
+            # Last dump of the path is gone; nothing can reference its blobs.
             self.gc_sources(pid, keep=set())
+            self.gc_values(pid, keep=set())
         return removed
 
     def gc_sources(self, pid: str, keep: Optional[set] = None) -> List[str]:
@@ -153,7 +197,39 @@ class DumpStore:
         the traceback -- any other edit produces a new path id, and so a new
         directory -- so this is a maintenance operation, not a hot one.
         """
-        blob_dir = os.path.join(self.path_dir(pid), SOURCE_DIR)
+        return self._gc_blobs(
+            pid,
+            SOURCE_DIR,
+            SOURCE_SUFFIX,
+            keep,
+            lambda dump: getattr(dump.sources, "manifest", {}).values(),
+        )
+
+    def gc_values(self, pid: str, keep: Optional[set] = None) -> List[str]:
+        """Delete dill streams of ``pid`` that no surviving dump references.
+
+        Like :meth:`gc_sources`, and for the same reason a maintenance task
+        rather than part of pruning. Streams only pile up when the captured
+        code itself changes between two dumps of one path.
+        """
+        return self._gc_blobs(
+            pid,
+            VALUE_DIR,
+            VALUE_SUFFIX,
+            keep,
+            lambda dump: [getattr(dump, "dill_blob_id", None)],
+        )
+
+    def _gc_blobs(
+        self,
+        pid: str,
+        subdir: str,
+        suffix: str,
+        keep: Optional[set],
+        referenced: Any,
+    ) -> List[str]:
+        """Delete blobs in one sidecar directory that ``referenced`` does not name."""
+        blob_dir = os.path.join(self.path_dir(pid), subdir)
         if not os.path.isdir(blob_dir):
             return []
         if keep is None:
@@ -163,12 +239,12 @@ class DumpStore:
                     dump = load_dump(os.path.join(self.path_dir(pid), trace_id + DUMP_SUFFIX))
                 except Exception:
                     return []  # Cannot prove a blob is unused; keep them all.
-                keep.update(getattr(dump.sources, "manifest", {}).values())
+                keep.update(name for name in referenced(dump) if name)
         removed = []
         for name in sorted(os.listdir(blob_dir)):
-            if not name.endswith(SOURCE_SUFFIX):
+            if not name.endswith(suffix):
                 continue
-            if name[: -len(SOURCE_SUFFIX)] in keep:
+            if name[: -len(suffix)] in keep:
                 continue
             if _silent_remove(os.path.join(blob_dir, name)):
                 removed.append(name)

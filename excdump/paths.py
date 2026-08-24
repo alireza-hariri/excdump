@@ -29,6 +29,13 @@ SOURCE_DIR = "sources"
 SOURCE_SUFFIX = ".json.gz"
 
 
+#: Sidecar holding the dill streams a path's dumps share.
+VALUE_DIR = "values"
+
+
+VALUE_SUFFIX = ".dill.gz"
+
+
 def relative_path(filename: str, root: Optional[str] = None) -> str:
     """Path as stored in dumps: relative to ``root`` when it lives under it."""
     if not filename or filename.startswith("<"):

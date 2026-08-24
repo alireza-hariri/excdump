@@ -13,6 +13,7 @@ from typing import Any
 import dill
 
 from .model import ExceptionDump, MissingRef, _normalize_dump
+from .paths import VALUE_DIR, VALUE_SUFFIX
 from .values import _resolve_dill_refs
 
 
@@ -44,10 +45,31 @@ def load_dump(filepath: str) -> ExceptionDump:
         except Exception as error:
             errors.append(f"{module.__name__}: {error}")
             continue
+        directory = os.path.dirname(os.path.abspath(filepath))
+        _attach_dill_blob(dump, directory)
         _resolve_dill_refs(dump)
         # The dump names its source by hash; the blobs sit next to it.
         sources = getattr(dump, "sources", None)
         if sources is not None and hasattr(sources, "attach"):
-            sources.attach(os.path.dirname(os.path.abspath(filepath)))
+            sources.attach(directory)
         return dump
     raise ValueError(f"could not load dump {filepath} ({'; '.join(errors)})")
+
+
+def _attach_dill_blob(dump: ExceptionDump, directory: str) -> None:
+    """Read back the shared dill stream a dump names, if it does not carry one.
+
+    Dumps of one exception path share their stream, so it lives beside them
+    rather than inside each. A missing blob is left as ``None``: the values it
+    held become visible placeholders and the rest of the dump still reads.
+    """
+    if getattr(dump, "dill_blob", None):
+        return
+    digest = getattr(dump, "dill_blob_id", None)
+    if not digest:
+        return
+    try:
+        with gzip.open(os.path.join(directory, VALUE_DIR, digest + VALUE_SUFFIX), "rb") as f:
+            dump.dill_blob = f.read()
+    except (OSError, EOFError):
+        pass
