@@ -19,23 +19,33 @@ except Exception:
 ```
 
 ```console
-$ python -m excdump inspect <trace-id>
+$ excdump inspect <trace-id>
 ```
 
 ## Install
 
+Add `excdump` as a library dependency to a Python project with uv:
+
 ```console
-$ uv add excdump          # or: pip install excdump
+$ uv add excdump
+```
+
+This makes the capture API available to your application:
+
+```python
+from excdump import dump_exception
+```
+
+To install the command-line tool globally in an isolated environment:
+
+```console
+$ uv tool install excdump
+$ excdump demo
+$ excdump inspect
 ```
 
 Requires Python 3.11+.
 
-Try it without writing any code:
-
-```console
-$ python -m excdump demo
-$ python -m excdump inspect
-```
 
 ## Capturing
 
@@ -58,7 +68,7 @@ from excdump import dump_on_exception
 def handle_checkout(cart):
     ...
 
-@dump_on_exception(on_dump=report_to_sentry, n_depth_up=2)
+@dump_on_exception(on_dump=report_to_otel, n_depth_up=2)
 def calculate_tax(order):
     ...
 ```
@@ -73,11 +83,11 @@ of each file involved.
 ## Inspecting
 
 ```console
-$ python -m excdump list                 # what the store holds, grouped by failure
-$ python -m excdump inspect              # the most recent dump
-$ python -m excdump inspect <trace-id>   # a specific one; a unique prefix works
-$ python -m excdump inspect <path-id>    # newest dump of one failure
-$ python -m excdump gc                   # reclaim paths nothing hits any more
+$ excdump list                 # what the store holds, grouped by failure
+$ excdump inspect              # the most recent dump
+$ excdump inspect <trace-id>   # a specific one; a unique prefix works
+$ excdump inspect <path-id>    # newest dump of one failure
+$ excdump gc                   # reclaim paths nothing hits any more
 ```
 
 `inspect` opens a `pdb`-like session over the dump. Frames, locals and globals

@@ -322,7 +322,15 @@ def gc_command(store: DumpStore, pid: Optional[str] = None) -> int:
     return 0
 
 
-def main(argv: List[str]) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
+    """Run the command-line interface.
+
+    ``argv`` includes the program name when supplied (as in ``sys.argv``).
+    Console-script entry points call this without arguments, so use the real
+    process arguments in that case.
+    """
+    if argv is None:
+        argv = sys.argv
     args = argv[1:]
     if "--pickle" in args:
         set_serializer("pickle")

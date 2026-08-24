@@ -26,6 +26,9 @@ Homepage = "https://github.com/alireza-hariri/excdump"
 Repository = "https://github.com/alireza-hariri/excdump"
 Issues = "https://github.com/alireza-hariri/excdump/issues"
 
+[project.scripts]
+excdump = "excdump.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
