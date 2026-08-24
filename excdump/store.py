@@ -8,6 +8,7 @@ import gzip
 import json
 import os
 import pickle
+import time
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -142,6 +143,75 @@ class DumpStore:
             # Last dump of the path is gone; nothing can reference its source.
             self.gc_sources(pid, keep=set())
         return removed
+
+    def gc_paths(
+        self,
+        pids: Optional[List[str]] = None,
+        max_age_days: Optional[float] = None,
+    ) -> List[str]:
+        """Delete whole paths nothing has hit for ``CONFIG.max_path_age_days``.
+
+        :meth:`prune` bounds the dumps within a path but never the number of
+        paths, and a path directory is never emptied -- so without this the
+        store only grows. Most of that growth is not stale so much as
+        unreachable: a path id hashes ``(filename, lineno)`` pairs, so a deploy
+        that shifts a line strands every path through that file under an id no
+        future exception can produce. Age separates those from failures that
+        simply have not recurred yet, and needs no deploy hook to do it.
+
+        Like :meth:`gc_sources`, a maintenance operation: deleting a path means
+        listing and unlinking it, which has no place on the capture path.
+        """
+        limit = CONFIG.max_path_age_days if max_age_days is None else max_age_days
+        if limit <= 0:
+            return []
+        cutoff = time.time() - limit * 86400.0
+        removed = []
+        for pid in self.path_ids() if pids is None else pids:
+            last_seen = self.path_last_seen(pid)
+            # No parseable dump: cannot tell the path's age, so leave it alone.
+            if last_seen is None or last_seen >= cutoff:
+                continue
+            if self._remove_path(pid, cutoff):
+                removed.append(pid)
+        return removed
+
+    def path_last_seen(self, pid: str) -> Optional[float]:
+        """When this path last occurred, or ``None`` if that cannot be told.
+
+        Read out of the file names: a trace id carries the capture time as
+        fixed-width nanoseconds, so the age of a path costs one directory
+        listing -- no ``stat`` calls, and certainly no loading of dumps.
+        """
+        for trace_id in reversed(self.dump_ids(pid)):
+            parts = trace_id.split("-")
+            if len(parts) > 1 and parts[1].isdigit():
+                return int(parts[1]) / 1e9
+        return None
+
+    def _remove_path(self, pid: str, cutoff: float) -> bool:
+        """Delete one path's dumps, source blobs and metadata, then itself.
+
+        Only the dumps listed here are deleted, and the directory is removed
+        with ``rmdir`` rather than recursively: a peer that captured this
+        failure again in the meantime leaves a dump behind, ``rmdir`` refuses,
+        and the revived path survives with its new dump.
+        """
+        directory = self.path_dir(pid)
+        trace_ids = self.dump_ids(pid)
+        # Re-read the age from that same listing: the path may have been hit
+        # between the survey and now, which makes it live again.
+        if not trace_ids or (self.path_last_seen(pid) or 0.0) >= cutoff:
+            return False
+        for trace_id in trace_ids:
+            _silent_remove(os.path.join(directory, trace_id + DUMP_SUFFIX))
+        self.gc_sources(pid, keep=set())
+        _silent_remove(os.path.join(directory, PATH_META))
+        try:
+            os.rmdir(directory)
+            return True
+        except OSError:
+            return False
 
     def gc_sources(self, pid: str, keep: Optional[set] = None) -> List[str]:
         """Delete source blobs of ``pid`` that no surviving dump references.

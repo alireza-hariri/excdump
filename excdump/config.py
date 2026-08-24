@@ -83,6 +83,18 @@ class Config(BaseModel):
         ge=0,
         description="Per-path retention; 0 disables pruning.",
     )
+    #: How long a whole exception path outlives its last occurrence. Retention
+    #: bounds the dumps *within* a path but not the number of paths, and every
+    #: deploy strands a generation of them: a path id hashes line numbers, so
+    #: editing a file makes each traceback through it hash differently and the
+    #: old ids unreachable. Age is what tells those apart from live failures --
+    #: a path nobody has hit in a month is a fixed bug or deleted code. Applied
+    #: by ``gc``, never while capturing.
+    max_path_age_days: float = Field(
+        default_factory=lambda: _env("MAX_PATH_AGE_DAYS", 30.0, float),
+        ge=0,
+        description="Age at which gc drops an untouched path; 0 keeps paths forever.",
+    )
     #: Caller frames captured above the handling frame.
     n_depth_up: int = Field(default_factory=lambda: _env("DEPTH_UP", 5, int), ge=0)
     #: Traceback frames captured below the handling frame.
@@ -149,6 +161,7 @@ def configure(
     *,
     store_dir: Union[str, Unset] = UNSET,
     max_dumps_per_path: Union[int, Unset] = UNSET,
+    max_path_age_days: Union[float, Unset] = UNSET,
     n_depth_up: Union[int, Unset] = UNSET,
     n_depth_down: Union[int, Unset] = UNSET,
     serializer: Union[SerializerName, Unset] = UNSET,

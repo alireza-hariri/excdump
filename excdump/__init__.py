@@ -28,7 +28,8 @@ In production, capture is configured once and then needs no arguments::
 Dumps are filed by *exception path* -- the ``(filename, lineno)`` list of the
 traceback -- and each path keeps only its most recent
 ``CONFIG.max_dumps_per_path`` dumps, so a hot failure loop cannot fill the disk
-and cannot push other, rarer failures out of the store.
+and cannot push other, rarer failures out of the store. Paths themselves are
+reclaimed by age -- see ``python -m excdump gc``.
 
 The implementation is split by responsibility -- :mod:`~excdump.config`,
 :mod:`~excdump.paths`, :mod:`~excdump.model`, :mod:`~excdump.sources`,

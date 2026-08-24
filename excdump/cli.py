@@ -1,15 +1,15 @@
 """The command line and the plain readline inspector.
 
-``inspect`` opens a dump, ``list`` shows what the store holds, ``gc`` reclaims
-unreferenced source blobs, and ``demo`` writes one so there is something to
-look at.
+``inspect`` opens a dump, ``list`` shows what the store holds, ``gc`` drops
+dead paths and unreferenced source blobs, and ``demo`` writes a dump so there
+is something to look at.
 """
 
 import sys
 from typing import Dict, List, Optional, Tuple
 
 from .capture import dump_exception
-from .config import configure, set_serializer
+from .config import CONFIG, configure, set_serializer
 from .model import ExceptionDump
 from .session import DebuggerSession
 from .store import DumpStore, resolve_dump
@@ -228,7 +228,16 @@ Options:
                   (per-value pickle, dill only where pickle fails; demo only)
   --plain         Force the readline inspector instead of the TUI
 
-``gc`` drops source blobs no surviving dump refers to. Retention deletes dumps
+``gc`` reclaims two things, and is the only command that deletes on purpose.
+
+It drops whole exception paths nothing has hit for ``CONFIG.max_path_age_days``
+(30 by default, 0 to keep them forever). Retention bounds the dumps within a
+path but not the number of paths, and a deploy strands a whole generation of
+them: a path id hashes line numbers, so shifting a line puts every traceback
+through that file under a new id and leaves the old one unreachable. Age tells
+those apart from failures that just have not recurred yet.
+
+It also drops source blobs no surviving dump refers to. Retention deletes dumps
 but leaves their source behind, since working out what is still referenced
 means reading every remaining dump -- too much work to do while capturing an
 exception. Blobs only pile up when a captured file changes without moving any
@@ -302,18 +311,26 @@ def _demo() -> int:
 
 
 def gc_command(store: DumpStore, pid: Optional[str] = None) -> int:
-    """Drop source blobs that no surviving dump of a path still references."""
+    """Drop paths nothing hits any more, and source blobs nothing references."""
     targets = [pid] if pid else store.path_ids()
     if not targets:
         print("No dumps found.")
         return 0
+    expired = store.gc_paths(targets)
+    for target in expired:
+        print(f"{target}: dropped, last seen over {CONFIG.max_path_age_days:g} days ago")
     total = 0
     for target in targets:
+        if target in expired:
+            continue
         removed = store.gc_sources(target)
         total += len(removed)
         if removed:
             print(f"{target}: dropped {len(removed)} unreferenced source blob(s)")
-    print(f"Reclaimed {total} source blob(s) across {len(targets)} path(s).")
+    print(
+        f"Reclaimed {len(expired)} path(s) and {total} source blob(s) "
+        f"across {len(targets)} path(s)."
+    )
     return 0
 
 
