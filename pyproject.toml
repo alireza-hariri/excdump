@@ -4,11 +4,27 @@ version = "0.1.0"
 description = "Capture a full exception snapshot and debug it later, offline."
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Alireza Hariri", email = "ali.r.hariri@gmail.com" }]
+keywords = ["debugging", "exceptions", "traceback", "postmortem", "pdb"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Debuggers",
+    "Typing :: Typed",
+]
 dependencies = [
     "dill>=0.4.1",
     "prompt-toolkit>=3.0.53",
     "pydantic>=2.13.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alireza-hariri/excdump"
+Repository = "https://github.com/alireza-hariri/excdump"
+Issues = "https://github.com/alireza-hariri/excdump/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -16,6 +32,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["excdump"]
+
+[tool.hatch.build.targets.sdist]
+# The wheel is just the package; the sdist carries what a reader needs too.
+include = ["excdump", "README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
 dev = ["pyflakes>=3.4"]
