@@ -24,11 +24,11 @@ $ python -m excdump inspect <trace-id>
 
 ## Install
 
-Requires Python 3.14+.
-
 ```console
-$ uv sync          # or: pip install -e .
+$ uv add excdump          # or: pip install excdump
 ```
+
+Requires Python 3.11+.
 
 Try it without writing any code:
 
