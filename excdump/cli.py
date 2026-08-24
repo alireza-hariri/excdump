@@ -213,9 +213,6 @@ USAGE = """Usage:
   python -m excdump gc [<path-id>]
   python -m excdump demo
 
-``python exception_debugger.py <command>`` runs the same commands through the
-compatibility facade.
-
 The trace id is the value returned by dump_exception() (and handed to the
 on_dump callback), so a logged id goes straight into the inspector. A unique
 id prefix, a path id (opens that path's newest dump), or no argument at all

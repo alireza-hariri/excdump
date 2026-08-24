@@ -25,8 +25,8 @@ class _ModuleRef:
 
     Frames routinely hold imported modules in their globals. Plain pickle
     refuses them outright, and dill serializes a ``__main__``-reachable module
-    *by value* -- the ``exception_debugger`` module alone costs about 6 KB that
-    way, in every dump that captures a frame importing it. A module is fully
+    *by value* -- one mid-sized module costs about 6 KB that way, in every dump
+    that captures a frame importing it. A module is fully
     described by its name, and rebuilding it from that gives the inspector the
     real module rather than dill's reconstructed copy.
     """
@@ -151,13 +151,13 @@ class _ValueFilter:
 
     * A module is stored as its name (:class:`_ModuleRef`). Pickle refuses
       modules outright and dill copies a ``__main__``-reachable one by value --
-      about 6 KB for ``exception_debugger`` itself -- when the name alone
-      rebuilds the real module.
+      about 6 KB for a mid-sized one -- when the name alone rebuilds the real
+      module.
     * Anything plain pickle can store *and* that does not reference
       ``__main__`` is stored by pickle, which is far smaller than dill: a
       function in an imported module costs about 40 bytes by reference, and it
       resolves in the inspector because the module is importable there too.
-    * Everything else goes through dill by value, as a :class:`_DillValue`
+    * Everything else goes through dill by value, as a :class:`_DillRef`
       blob: lambdas, local classes and closures, which pickle cannot take at
       all, and anything defined in ``__main__``, whose pickled reference would
       resolve against the *inspector's* ``__main__`` and come back as

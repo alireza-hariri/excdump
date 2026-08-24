@@ -234,4 +234,4 @@ def _serializer_module(name: Optional[str] = None) -> ModuleType:
     return SERIALIZERS[_serializer_name(name)]
 
 
-logger = logging.getLogger("exception_debugger")
+logger = logging.getLogger("excdump")

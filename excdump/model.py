@@ -1,8 +1,8 @@
 """What a dump *is*: the frames, the exception chain, and the container.
 
 These are the classes pickle names inside every dump file, so their module path
-is part of the on-disk format. :mod:`exception_debugger` re-exports them under
-their original names to keep dumps written by earlier versions loadable.
+is part of the on-disk format: moving one of them makes every dump already on
+disk unreadable.
 """
 
 import os
