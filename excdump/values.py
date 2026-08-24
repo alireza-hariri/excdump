@@ -63,10 +63,8 @@ class _DillRef:
     Every value dill has to handle goes into *one* dill stream rather than a
     blob each, because dill memoizes: ten functions from the same module share
     one copy of what they reference, where ten separate blobs would each carry
-    their own. That stream is then shared across every dump of the exception
-    path, since they all capture the same code. The frames hold these
-    lightweight references, and :func:`_resolve_dill_refs` swaps in the real
-    objects after the dump loads.
+    their own. The frames hold these lightweight references, and
+    :func:`_resolve_dill_refs` swaps in the real objects after the dump loads.
     """
 
     __slots__ = ("index",)
@@ -81,17 +79,12 @@ class _DillRef:
 def _resolve_dill_refs(dump: Any) -> None:
     """Replace every :class:`_DillRef` in ``dump`` with its real value."""
     blob = getattr(dump, "dill_blob", None)
-    if blob:
-        try:
-            values = dill.loads(blob)
-        except Exception as error:
-            values = MissingRef("dill", f"blob ({type(error).__name__})")
-    elif getattr(dump, "dill_blob_id", None):
-        # The stream lives in the path's sidecar and the sidecar is gone --
-        # deleted, or the dump was copied away on its own.
-        values = MissingRef("dill", "blob (not found)")
-    else:
+    if not blob:
         return
+    try:
+        values = dill.loads(blob)
+    except Exception as error:
+        values = MissingRef("dill", f"blob ({type(error).__name__})")
     for record in getattr(dump, "exceptions", None) or []:
         for frame in getattr(record, "frames", None) or []:
             for scope in (frame.locals, frame.globals):
