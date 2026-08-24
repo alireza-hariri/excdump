@@ -13,7 +13,6 @@ import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import CONFIG
-from .loading import load_dump
 from .model import ExceptionDump
 from .paths import (
     DUMP_SUFFIX,
@@ -21,9 +20,16 @@ from .paths import (
     PATH_META,
     SOURCE_DIR,
     SOURCE_SUFFIX,
+    TEMP_SUFFIX,
     _silent_remove,
     trace_path_id,
 )
+
+
+#: A temporary older than this was left behind by a process that died between
+#: writing a file and renaming it into place. A rename takes microseconds, so
+#: nothing legitimate is ever this old.
+STALE_TEMPORARY_SECONDS = 3600.0
 
 
 class DumpStore:
@@ -66,7 +72,7 @@ class DumpStore:
         target = os.path.join(directory, dump.trace_id + DUMP_SUFFIX)
         # Write to a temporary name first: a reader (or a pruning peer) must
         # never observe a half-written dump.
-        temporary = target + ".part"
+        temporary = target + TEMP_SUFFIX
         try:
             # gzip keeps the API as one portable file while compressing repeated
             # frame names, paths, source text, and traceback text very well.
@@ -142,7 +148,7 @@ class DumpStore:
             # Self-describing, so a blob still means something on its own and
             # the sidecar needs no index file for a reader to make sense of it.
             payload = {"path": owners.get(digest, ""), "sha256": digest, "lines": lines}
-            temporary = f"{target}.{os.getpid()}.part"
+            temporary = f"{target}.{os.getpid()}{TEMP_SUFFIX}"
             try:
                 with gzip.open(temporary, "wt", encoding="utf-8", compresslevel=9) as handle:
                     json.dump(payload, handle)
@@ -159,7 +165,7 @@ class DumpStore:
             "exc_type": dump.exc_type,
             "path": [[name, line] for name, line in dump.path],
         }
-        temporary = f"{meta_file}.{os.getpid()}.part"
+        temporary = f"{meta_file}.{os.getpid()}{TEMP_SUFFIX}"
         try:
             with open(temporary, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2)
@@ -168,7 +174,12 @@ class DumpStore:
             _silent_remove(temporary)
 
     def prune(self, pid: str, max_per_path: Optional[int] = None) -> List[str]:
-        """Delete the oldest dumps of one path beyond the retention limit."""
+        """Delete the oldest dumps of one path beyond the retention limit.
+
+        Source blobs the pruned dumps referenced are left alone. Sorting out
+        which are still wanted means loading every dump that survived, and they
+        go anyway when the path itself is reclaimed by age.
+        """
         limit = self.max_per_path if max_per_path is None else max_per_path
         if limit <= 0:
             return []
@@ -178,9 +189,6 @@ class DumpStore:
             target = os.path.join(self.path_dir(pid), trace_id + DUMP_SUFFIX)
             if _silent_remove(target):
                 removed.append(trace_id)
-        if removed and not self.dump_ids(pid):
-            # Last dump of the path is gone; nothing can reference its source.
-            self.gc_sources(pid, keep=set())
         return removed
 
     def gc_paths(
@@ -191,15 +199,18 @@ class DumpStore:
         """Delete whole paths nothing has hit for ``CONFIG.max_path_age_days``.
 
         :meth:`prune` bounds the dumps within a path but never the number of
-        paths, and a path directory is never emptied -- so without this the
-        store only grows. Most of that growth is not stale so much as
-        unreachable: a path id hashes ``(filename, lineno)`` pairs, so a deploy
-        that shifts a line strands every path through that file under an id no
-        future exception can produce. Age separates those from failures that
-        simply have not recurred yet, and needs no deploy hook to do it.
+        paths -- so without this the store only grows. Most of that growth is
+        not stale so much as unreachable: a path id hashes ``(filename,
+        lineno)`` pairs, so a deploy that shifts a line strands every path
+        through that file under an id no future exception can produce. Age
+        separates those from failures that simply have not recurred yet, and
+        needs no deploy hook to do it.
 
-        Like :meth:`gc_sources`, a maintenance operation: deleting a path means
-        listing and unlinking it, which has no place on the capture path.
+        This is where everything in the store is reclaimed. Nothing inside a
+        path is collected on its own: working out which source blobs a dump
+        still wants means loading it, and the whole directory goes together
+        when the failure stops happening. Paths that stay only have their
+        abandoned temporaries swept.
         """
         limit = CONFIG.max_path_age_days if max_age_days is None else max_age_days
         if limit <= 0:
@@ -208,103 +219,118 @@ class DumpStore:
         removed = []
         for pid in self.path_ids() if pids is None else pids:
             last_seen = self.path_last_seen(pid)
-            # No parseable dump: cannot tell the path's age, so leave it alone.
-            if last_seen is None or last_seen >= cutoff:
-                continue
-            if self._remove_path(pid, cutoff):
+            if last_seen is None:
+                continue  # Unreadable directory; nothing to judge it on.
+            if last_seen < cutoff and self._remove_path(pid, cutoff):
                 removed.append(pid)
+            else:
+                self._drop_stale_temporaries(pid)
         return removed
 
     def path_last_seen(self, pid: str) -> Optional[float]:
-        """When this path last occurred, or ``None`` if that cannot be told.
+        """When this path last occurred, or ``None`` if it cannot be read.
 
-        Read out of the file names: a trace id carries the capture time as
+        Taken from the file names: a trace id carries its capture time as
         fixed-width nanoseconds, so the age of a path costs one directory
         listing -- no ``stat`` calls, and certainly no loading of dumps.
+
+        A path holding no readable dump falls back to the mtime of the
+        directory itself. That is what collects one emptied by hand, and one
+        left holding nothing but a temporary from a process killed mid-write --
+        both of which are invisible to the listing above and so, judged on
+        dumps alone, would be skipped forever. It cannot strand a directory a
+        peer is creating right now, whose mtime is now.
         """
         for trace_id in reversed(self.dump_ids(pid)):
             parts = trace_id.split("-")
             if len(parts) > 1 and parts[1].isdigit():
                 return int(parts[1]) / 1e9
-        return None
+        try:
+            return os.path.getmtime(self.path_dir(pid))
+        except OSError:
+            return None
 
     def _remove_path(self, pid: str, cutoff: float) -> bool:
-        """Delete one path's dumps, source blobs and metadata, then itself.
+        """Delete everything in one path directory, then the directory itself.
 
-        Only the dumps listed here are deleted, and the directory is removed
+        Everything: dumps, source blobs, metadata, and any temporary left
+        behind by a process that died mid-write. With the path goes the only
+        thing that referred to any of it.
+
+        Only the entries listed here are deleted, and the directory is removed
         with ``rmdir`` rather than recursively: a peer that captured this
         failure again in the meantime leaves a dump behind, ``rmdir`` refuses,
         and the revived path survives with its new dump.
         """
         directory = self.path_dir(pid)
-        trace_ids = self.dump_ids(pid)
-        # Re-read the age from that same listing: the path may have been hit
-        # between the survey and now, which makes it live again.
-        if not trace_ids or (self.path_last_seen(pid) or 0.0) >= cutoff:
+        # Re-read the age: the path may have been hit since the survey, which
+        # makes it live again.
+        if (self.path_last_seen(pid) or 0.0) >= cutoff:
             return False
-        for trace_id in trace_ids:
-            _silent_remove(os.path.join(directory, trace_id + DUMP_SUFFIX))
-        self.gc_sources(pid, keep=set())
-        _silent_remove(os.path.join(directory, PATH_META))
+        blob_dir = os.path.join(directory, SOURCE_DIR)
+        # The sidecar is emptied first: it is itself an entry of the path
+        # directory, and only an empty one can be unlinked with the rest.
+        for subdir in (blob_dir, directory):
+            for name in self._listdir(subdir):
+                _silent_remove(os.path.join(subdir, name))
+        try:
+            os.rmdir(blob_dir)
+        except OSError:
+            pass  # Absent, or a peer wrote into it -- the verdict is below.
         try:
             os.rmdir(directory)
             return True
         except OSError:
             return False
 
-    def gc_sources(self, pid: str, keep: Optional[set] = None) -> List[str]:
-        """Delete source blobs of ``pid`` that no surviving dump references.
+    def _drop_stale_temporaries(self, pid: str) -> List[str]:
+        """Delete half-written files a process died before renaming into place.
 
-        Not called after an ordinary prune: working out what is still
-        referenced means loading every remaining dump of the path, which is far
-        more work than the blobs are worth on the capture path. Blobs only
-        accumulate when a captured file changes *without* moving any line in
-        the traceback -- any other edit produces a new path id, and so a new
-        directory -- so this is a maintenance operation, not a hot one.
+        :meth:`write` unlinks its own temporary when it fails, but ``SIGKILL``
+        and power loss run no handler. What they leave matches none of the
+        suffixes anything here lists, so without this nothing would ever
+        collect it -- and a leftover in a path due for removal would keep
+        ``rmdir`` failing forever.
         """
-        blob_dir = os.path.join(self.path_dir(pid), SOURCE_DIR)
-        if not os.path.isdir(blob_dir):
-            return []
-        if keep is None:
-            keep = set()
-            for trace_id in self.dump_ids(pid):
-                try:
-                    dump = load_dump(os.path.join(self.path_dir(pid), trace_id + DUMP_SUFFIX))
-                except Exception:
-                    return []  # Cannot prove a blob is unused; keep them all.
-                keep.update(getattr(dump.sources, "manifest", {}).values())
+        directory = self.path_dir(pid)
+        horizon = time.time() - STALE_TEMPORARY_SECONDS
         removed = []
-        for name in sorted(os.listdir(blob_dir)):
-            if not name.endswith(SOURCE_SUFFIX):
-                continue
-            if name[: -len(SOURCE_SUFFIX)] in keep:
-                continue
-            if _silent_remove(os.path.join(blob_dir, name)):
-                removed.append(name)
-        try:
-            os.rmdir(blob_dir)  # Only succeeds when nothing is left.
-        except OSError:
-            pass
+        for subdir in (directory, os.path.join(directory, SOURCE_DIR)):
+            for name in self._listdir(subdir):
+                if not name.endswith(TEMP_SUFFIX):
+                    continue
+                target = os.path.join(subdir, name)
+                try:
+                    if os.path.getmtime(target) >= horizon:
+                        continue  # Someone may still be writing it.
+                except OSError:
+                    continue
+                if _silent_remove(target):
+                    removed.append(name)
         return removed
 
     # -- reading -------------------------------------------------------------
 
-    def path_ids(self) -> List[str]:
+    def _listdir(self, directory: str) -> List[str]:
+        """Sorted entries of a directory, empty if it is gone or unreadable."""
         try:
-            return sorted(
-                name for name in os.listdir(self.root)
-                if os.path.isdir(os.path.join(self.root, name))
-            )
+            return sorted(os.listdir(directory))
         except OSError:
             return []
 
+    def path_ids(self) -> List[str]:
+        return [
+            name for name in self._listdir(self.root)
+            if os.path.isdir(os.path.join(self.root, name))
+        ]
+
     def dump_ids(self, pid: str) -> List[str]:
         """Trace ids stored for one path, oldest first."""
-        try:
-            names = os.listdir(self.path_dir(pid))
-        except OSError:
-            return []
-        return sorted(n[: -len(DUMP_SUFFIX)] for n in names if n.endswith(DUMP_SUFFIX))
+        return [
+            name[: -len(DUMP_SUFFIX)]
+            for name in self._listdir(self.path_dir(pid))
+            if name.endswith(DUMP_SUFFIX)
+        ]
 
     def path_meta(self, pid: str) -> Dict[str, Any]:
         try:
@@ -319,13 +345,6 @@ class DumpStore:
         if os.path.exists(self.dump_file(trace_id)):
             return [trace_id]
         return [t for t in self.dump_ids(pid) if t.startswith(trace_id)]
-
-    def find(self, trace_id: str) -> Optional[str]:
-        """File for a trace id, or for a unique prefix of one."""
-        candidates = self.matches(trace_id)
-        if len(candidates) != 1:
-            return None
-        return os.path.join(self.path_dir(trace_path_id(trace_id)), candidates[0] + DUMP_SUFFIX)
 
     def latest(self, pid: Optional[str] = None) -> Optional[str]:
         """Most recent dump overall, or within one path."""

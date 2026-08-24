@@ -79,7 +79,7 @@ class Config(BaseModel):
     )
     #: How many dumps to keep for one exception path; the oldest are deleted.
     max_dumps_per_path: int = Field(
-        default_factory=lambda: _env("MAX_PER_PATH", 1000, int),
+        default_factory=lambda: _env("MAX_PER_PATH", 200, int),
         ge=0,
         description="Per-path retention; 0 disables pruning.",
     )
@@ -88,10 +88,10 @@ class Config(BaseModel):
     #: deploy strands a generation of them: a path id hashes line numbers, so
     #: editing a file makes each traceback through it hash differently and the
     #: old ids unreachable. Age is what tells those apart from live failures --
-    #: a path nobody has hit in a month is a fixed bug or deleted code. Applied
+    #: a path nobody has hit in weeks is a fixed bug or deleted code. Applied
     #: by ``gc``, and by capture itself at most once per ``gc_interval_seconds``.
     max_path_age_days: float = Field(
-        default_factory=lambda: _env("MAX_PATH_AGE_DAYS", 30.0, float),
+        default_factory=lambda: _env("MAX_PATH_AGE_DAYS", 14.0, float),
         ge=0,
         description="Age at which gc drops an untouched path; 0 keeps paths forever.",
     )

@@ -33,6 +33,11 @@ SOURCE_DIR = "sources"
 SOURCE_SUFFIX = ".json.gz"
 
 
+#: Everything is written under this suffix and renamed into place, so a reader
+#: never sees a half-written file.
+TEMP_SUFFIX = ".part"
+
+
 def relative_path(filename: str, root: Optional[str] = None) -> str:
     """Path as stored in dumps: relative to ``root`` when it lives under it."""
     if not filename or filename.startswith("<"):

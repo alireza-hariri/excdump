@@ -1,8 +1,8 @@
 """The command line and the plain readline inspector.
 
 ``inspect`` opens a dump, ``list`` shows what the store holds, ``gc`` drops
-dead paths and unreferenced source blobs, and ``demo`` writes a dump so there
-is something to look at.
+paths nothing hits any more, and ``demo`` writes a dump so there is something
+to look at.
 """
 
 import sys
@@ -228,23 +228,19 @@ Options:
                   (per-value pickle, dill only where pickle fails; demo only)
   --plain         Force the readline inspector instead of the TUI
 
-``gc`` reclaims two things, and is the only command that deletes on purpose.
+``gc`` drops whole exception paths nothing has hit for
+``CONFIG.max_path_age_days`` (0 keeps them forever), and with each one
+everything it held: dumps, captured source, and anything a process left
+half-written. Retention bounds the dumps within a path but not the number of
+paths, and a deploy strands a whole generation of them: a path id hashes line
+numbers, so shifting a line puts every traceback through that file under a new
+id and leaves the old one unreachable. Age tells those apart from failures that
+just have not recurred yet.
 
-It drops whole exception paths nothing has hit for ``CONFIG.max_path_age_days``
-(30 by default, 0 to keep them forever). Retention bounds the dumps within a
-path but not the number of paths, and a deploy strands a whole generation of
-them: a path id hashes line numbers, so shifting a line puts every traceback
-through that file under a new id and leaves the old one unreachable. Age tells
-those apart from failures that just have not recurred yet. Capture applies this
-same rule itself once every ``CONFIG.gc_interval_seconds`` (an hour by default,
-0 to leave it to this command), so a long-running service stays tidy without
-anyone running anything.
-
-It also drops source blobs no surviving dump refers to. Retention deletes dumps
-but leaves their source behind, since working out what is still referenced
-means reading every remaining dump -- too much work to do while capturing an
-exception. Blobs only pile up when a captured file changes without moving any
-line of the traceback, so this is rarely urgent.
+Capture applies the same rule itself once every ``CONFIG.gc_interval_seconds``
+(0 leaves it to this command), so a long-running service stays tidy without
+anyone running anything. Running ``gc`` sweeps immediately rather than waiting
+for the interval, and can be pointed at a single path.
 """
 
 
@@ -314,26 +310,18 @@ def _demo() -> int:
 
 
 def gc_command(store: DumpStore, pid: Optional[str] = None) -> int:
-    """Drop paths nothing hits any more, and source blobs nothing references."""
+    """Drop exception paths nothing hits any more."""
     targets = [pid] if pid else store.path_ids()
     if not targets:
         print("No dumps found.")
         return 0
+    if CONFIG.max_path_age_days <= 0:
+        print("Nothing to do: max_path_age_days is 0, so paths are kept forever.")
+        return 0
     expired = store.gc_paths(targets)
     for target in expired:
         print(f"{target}: dropped, last seen over {CONFIG.max_path_age_days:g} days ago")
-    total = 0
-    for target in targets:
-        if target in expired:
-            continue
-        removed = store.gc_sources(target)
-        total += len(removed)
-        if removed:
-            print(f"{target}: dropped {len(removed)} unreferenced source blob(s)")
-    print(
-        f"Reclaimed {len(expired)} path(s) and {total} source blob(s) "
-        f"across {len(targets)} path(s)."
-    )
+    print(f"Reclaimed {len(expired)} of {len(targets)} path(s).")
     return 0
 
 
