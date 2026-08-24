@@ -89,11 +89,23 @@ class Config(BaseModel):
     #: editing a file makes each traceback through it hash differently and the
     #: old ids unreachable. Age is what tells those apart from live failures --
     #: a path nobody has hit in a month is a fixed bug or deleted code. Applied
-    #: by ``gc``, never while capturing.
+    #: by ``gc``, and by capture itself at most once per ``gc_interval_seconds``.
     max_path_age_days: float = Field(
         default_factory=lambda: _env("MAX_PATH_AGE_DAYS", 30.0, float),
         ge=0,
         description="Age at which gc drops an untouched path; 0 keeps paths forever.",
+    )
+    #: How often capture sweeps dead paths itself, so a long-running service
+    #: does not depend on someone remembering to run ``gc``. Time, not a share
+    #: of captures: sweeping every thousandth exception would sweep constantly
+    #: under a failure storm and never at all in a service that fails twice a
+    #: week. Only the age rule runs here -- it costs one directory listing per
+    #: path, where reclaiming source blobs means loading every dump and stays
+    #: in the command.
+    gc_interval_seconds: float = Field(
+        default_factory=lambda: _env("GC_INTERVAL_SECONDS", 3600.0, float),
+        ge=0,
+        description="Seconds between automatic sweeps during capture; 0 disables them.",
     )
     #: Caller frames captured above the handling frame.
     n_depth_up: int = Field(default_factory=lambda: _env("DEPTH_UP", 5, int), ge=0)
@@ -162,6 +174,7 @@ def configure(
     store_dir: Union[str, Unset] = UNSET,
     max_dumps_per_path: Union[int, Unset] = UNSET,
     max_path_age_days: Union[float, Unset] = UNSET,
+    gc_interval_seconds: Union[float, Unset] = UNSET,
     n_depth_up: Union[int, Unset] = UNSET,
     n_depth_down: Union[int, Unset] = UNSET,
     serializer: Union[SerializerName, Unset] = UNSET,

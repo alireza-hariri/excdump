@@ -22,6 +22,10 @@ DUMP_SUFFIX = ".dump"
 PATH_META = "path.json"
 
 
+#: Empty marker in the store root; its mtime is when a sweep last ran.
+GC_STAMP = ".gc"
+
+
 #: Sidecar holding the full text of every file a path's dumps captured.
 SOURCE_DIR = "sources"
 

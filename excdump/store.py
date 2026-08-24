@@ -17,6 +17,7 @@ from .loading import load_dump
 from .model import ExceptionDump
 from .paths import (
     DUMP_SUFFIX,
+    GC_STAMP,
     PATH_META,
     SOURCE_DIR,
     SOURCE_SUFFIX,
@@ -78,7 +79,45 @@ class DumpStore:
             raise
 
         self.prune(trace_path_id(dump.trace_id))
+        self.maybe_gc()
         return target
+
+    def maybe_gc(self, interval: Optional[float] = None) -> List[str]:
+        """Sweep dead paths, but at most once per ``CONFIG.gc_interval_seconds``.
+
+        Without this a store is only ever tidied by someone remembering to run
+        ``gc``, which on a long-running service means never. The rate is set in
+        time rather than as a share of captures, because capture rate is the
+        wrong clock: a failure storm would sweep thousands of times an hour and
+        a service that fails twice a week would never sweep at all.
+
+        The interval is held in the mtime of an empty marker in the store root,
+        and claimed by touching it *before* sweeping, so a peer capturing
+        meanwhile sees a fresh stamp and skips. Two processes racing that
+        window both sweep, which is harmless -- the sweep tolerates a peer
+        having deleted a file first. Only the age rule runs; reclaiming source
+        blobs means loading every dump and stays in the command.
+
+        Never raises: this runs with an exception already in flight, and the
+        dump is on disk by the time it is called. A store that cannot be swept
+        is not a reason to lose the capture.
+        """
+        seconds = CONFIG.gc_interval_seconds if interval is None else interval
+        if seconds <= 0 or CONFIG.max_path_age_days <= 0:
+            return []
+        try:
+            stamp = os.path.join(self.root, GC_STAMP)
+            try:
+                due = time.time() - os.path.getmtime(stamp) >= seconds
+            except OSError:
+                due = True  # No marker yet: this is the store's first sweep.
+            if not due:
+                return []
+            with open(stamp, "a"):
+                os.utime(stamp, None)
+            return self.gc_paths()
+        except Exception:
+            return []
 
     def write_sources(self, directory: str, dump: ExceptionDump) -> None:
         """Write each captured file's full text as a content-addressed blob.

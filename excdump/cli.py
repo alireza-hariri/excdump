@@ -235,7 +235,10 @@ It drops whole exception paths nothing has hit for ``CONFIG.max_path_age_days``
 path but not the number of paths, and a deploy strands a whole generation of
 them: a path id hashes line numbers, so shifting a line puts every traceback
 through that file under a new id and leaves the old one unreachable. Age tells
-those apart from failures that just have not recurred yet.
+those apart from failures that just have not recurred yet. Capture applies this
+same rule itself once every ``CONFIG.gc_interval_seconds`` (an hour by default,
+0 to leave it to this command), so a long-running service stays tidy without
+anyone running anything.
 
 It also drops source blobs no surviving dump refers to. Retention deletes dumps
 but leaves their source behind, since working out what is still referenced
