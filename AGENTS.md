@@ -25,5 +25,4 @@ If `uv` is unavailable, use the venv:
 .venv/bin/activate/pytest
 ```
 
-To publish a release to PyPI, bump the version, run `uv build`, and publish only the artifacts for that version with `uv publish dist/excdump-<version>.tar.gz dist/excdump-<version>-py3-none-any.whl`. `UV_PUBLISH_TOKEN` is provided by the environment; do not use `uv publish dist/*` because old artifacts in `dist/` may already exist on PyPI.
-
+To publish a release to PyPI, bump the version, run `uv build`, and publish the artifacts for that version with `uv publish dist/excdump-<version>.tar.gz dist/excdump-<version>-py3-none-any.whl`.
