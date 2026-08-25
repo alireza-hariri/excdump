@@ -18,11 +18,33 @@ from .values import _resolve_dill_refs
 
 def _tolerant_unpickler(module: Any) -> Any:
     class Unpickler(module.Unpickler):
+        def __init__(self, *args: Any, **kwargs: Any):
+            super().__init__(*args, **kwargs)
+            self._missing_classes = {}
+
         def find_class(self, module_name: str, name: str) -> Any:
             try:
                 return super().find_class(module_name, name)
             except Exception:
-                return MissingRef(module_name, name)
+                # A missing global can be either a value or the class used by
+                # NEWOBJ/NEWOBJ_EX to rebuild a value.  Returning a MissingRef
+                # instance works for the former, but pickle requires the
+                # latter to be a type and otherwise raises before we can
+                # degrade the value.  Return a short-lived type whose __new__
+                # turns the reconstructed object into the usual placeholder.
+                key = (module_name, name)
+                missing = self._missing_classes.get(key)
+                if missing is None:
+                    def missing_new(cls: Any, *args: Any, **kwargs: Any) -> MissingRef:
+                        return MissingRef(module_name, name)
+
+                    missing = type(
+                        "MissingRef",
+                        (MissingRef,),
+                        {"__new__": missing_new},
+                    )
+                    self._missing_classes[key] = missing
+                return missing
 
     return Unpickler
 
