@@ -17,14 +17,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # -- global configuration ----------------------------------------------------
 
-SerializerName = Literal["auto", "dill", "pickle"]
+SerializerName = Literal["snapshot", "dill", "pickle"]
 
 
 #: Module that writes the outer dump stream for each serializer setting.
-#: ``"auto"`` writes plain pickle and reaches for dill only per value, so its
-#: stream is a pickle stream (see :class:`_ValueFilter`).
+#: ``"snapshot"`` writes plain pickle and reaches for dill only per value,
+#: so its stream is a pickle stream (see :class:`_ValueFilter`).
 SERIALIZERS: Dict[SerializerName, ModuleType] = {
-    "auto": pickle, "dill": dill, "pickle": pickle,
+    "snapshot": pickle, "dill": dill, "pickle": pickle,
 }
 
 
@@ -111,11 +111,11 @@ class Config(BaseModel):
     n_depth_up: int = Field(default_factory=lambda: _env("DEPTH_UP", 5, int), ge=0)
     #: Traceback frames captured below the handling frame.
     n_depth_down: int = Field(default_factory=lambda: _env("DEPTH_DOWN", 10, int), ge=0)
-    #: ``"auto"`` (pickle per value, dill only where pickle fails), ``"dill"``
+    #: ``"snapshot"`` (pickle per value, dill only where pickle fails), ``"dill"``
     #: (captures more, much larger) or ``"pickle"`` (smallest, drops what
     #: pickle cannot take).
     serializer: SerializerName = Field(
-        default_factory=lambda: _env("SERIALIZER", "auto", _env_serializer)
+        default_factory=lambda: _env("SERIALIZER", "snapshot", _env_serializer)
     )
     #: Lines of source kept above and below each captured line.
     source_radius: int = Field(default_factory=lambda: _env("SOURCE_RADIUS", 5, int), ge=0)
@@ -128,7 +128,7 @@ class Config(BaseModel):
     max_dill_bytes: int = Field(
         default_factory=lambda: _env("MAX_DILL_BYTES", 65536, int), ge=0
     )
-    #: How deep ``"auto"`` expands a value neither serializer can carry
+    #: How deep ``"snapshot"`` expands a value neither serializer can carry
     #: portably. Expansion keeps such a value readable -- an object becomes its
     #: attributes, a container its elements -- instead of a repr string or a
     #: MissingRef, but an attribute graph reaches the whole process if nothing
@@ -217,7 +217,7 @@ def configure(
 def set_serializer(name: SerializerName) -> None:
     """Select how new dumps serialize captured values.
 
-    ``"auto"`` (the default) tries plain pickle for each value and falls back
+    ``"snapshot"`` (the default) tries plain pickle for each value and falls back
     to dill only for the ones pickle rejects, which is both the smallest option
     that loses nothing pickle could have kept and much smaller than ``"dill"``
     -- see :class:`_ValueFilter` for why dill is expensive.

@@ -143,22 +143,22 @@ def test_dill_mode_dump_still_loads_without_the_module(dump_without_its_helper):
     scale = frame.locals["fn"]
     assert callable(scale)
     assert scale.__name__ == "<lambda>"
-    # The lambda and its globals are preserved by value, even though helper.py
-    # is no longer importable.
-    assert scale.__globals__.get("CONST") == 7
-    assert scale(2) == 14
+    # Strict dill preserves the function but resolves its unavailable globals
+    # module as a placeholder, matching the pre-0.1.5 behavior.
+    with pytest.raises(NameError):
+        scale(2)
 
 
-def test_auto_mode_keeps_the_function_rather_than_a_missing_reference(
+def test_snapshot_mode_keeps_the_function_rather_than_a_missing_reference(
     dump_without_its_helper,
 ):
     """The isolated payload must be read as tolerantly as the outer stream.
 
-    Auto mode never lost the dump -- each value travels in its own payload --
+    Snapshot mode never lost the dump -- each value travels in its own payload --
     but loading a payload with plain dill made one absent name cost the entire
     value, which then read back as :class:`MissingRef`.
     """
-    dump = load_dump(dump_without_its_helper("auto"))
+    dump = load_dump(dump_without_its_helper("snapshot"))
     frame = next(frame for frame in dump.frames if frame.name == "fail")
     scale = frame.locals["fn"]
     assert not isinstance(scale, MissingRef)
@@ -169,10 +169,10 @@ def test_auto_mode_keeps_the_function_rather_than_a_missing_reference(
     assert imported_fn(3) == 6
 
 
-def test_auto_mode_keeps_attributes_when_an_imported_class_is_gone(
+def test_snapshot_mode_keeps_attributes_when_an_imported_class_is_gone(
     dump_with_gone_object_module,
 ):
-    dump = load_dump(dump_with_gone_object_module("auto"))
+    dump = load_dump(dump_with_gone_object_module("snapshot"))
     frame = next(frame for frame in dump.frames if frame.name == "fail")
     user = frame.locals["user"]
     assert not isinstance(user, MissingRef)
@@ -180,12 +180,9 @@ def test_auto_mode_keeps_attributes_when_an_imported_class_is_gone(
     assert user.name == "Ada"
 
 
-def test_dill_mode_keeps_attributes_when_an_imported_class_is_gone(
+def test_dill_mode_keeps_missing_reference_when_an_imported_class_is_gone(
     dump_with_gone_object_module,
 ):
     dump = load_dump(dump_with_gone_object_module("dill"))
     frame = next(frame for frame in dump.frames if frame.name == "fail")
-    user = frame.locals["user"]
-    assert not isinstance(user, MissingRef)
-    assert user.user_id == 7
-    assert user.name == "Ada"
+    assert isinstance(frame.locals["user"], MissingRef)

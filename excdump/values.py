@@ -270,7 +270,7 @@ def _pickle_payload(value: Any) -> Optional[bytes]:
 class _ValueFilter:
     """Stores each captured value with the cheapest thing that can hold it.
 
-    ``"auto"`` picks per value, on one question: will this still be *there*
+    ``"snapshot"`` picks per value, on one question: will this still be *there*
     when the dump is opened somewhere else?
 
     * A module is stored as its name (:class:`_ModuleRef`). Pickle refuses
@@ -306,10 +306,10 @@ class _ValueFilter:
         if serializer is not None and not isinstance(serializer, str):
             serializer = getattr(serializer, "__name__", None)  # a module
         self.name = _serializer_name(serializer)
-        #: Only "auto" chooses per value; the strict modes run one serializer.
-        self.auto = self.name == "auto"
+        #: Only "snapshot" chooses per value; the strict modes run one serializer.
+        self.snapshot = self.name == "snapshot"
         self.strict = SERIALIZERS[self.name]
-        self.max_dill_bytes = CONFIG.max_dill_bytes if self.auto else 0
+        self.max_dill_bytes = CONFIG.max_dill_bytes if self.snapshot else 0
         #: Individual dill payloads, in _DillRef index order. They are wrapped
         #: in one small outer blob only to keep the dump model compact.
         self.dill_payloads: List[bytes] = []
@@ -339,27 +339,10 @@ class _ValueFilter:
 
     def _decide(self, value: Any) -> Any:
         """``None`` to store the value itself, else what replaces it."""
-        return self._auto_decide(value) if self.auto else self._strict_decide(value)
+        return self._snapshot_decide(value) if self.snapshot else self._strict_decide(value)
 
     def _strict_decide(self, value: Any) -> Any:
         """One serializer, take it or leave it: the ``"dill"``/``"pickle"`` modes."""
-        # Dill serializes ordinary modules through its private
-        # ``_import_module`` reducer. If the application module is absent at
-        # inspection time, that reducer raises before our tolerant
-        # ``find_class`` hook gets a chance to replace it. Use the portable
-        # name wrapper in every mode, just as auto mode does.
-        if isinstance(value, ModuleType):
-            name = getattr(value, "__name__", None)
-            if name:
-                return _ModuleRef(name)
-        expanded = self._expand_application_object(value)
-        if expanded is not _MISSING:
-            return expanded
-        if self.name == "dill" and isinstance(value, FunctionType):
-            blob = _dill_payload(value)
-            if blob is not None:
-                self.dill_payloads.append(blob)
-                return _DillRef(len(self.dill_payloads) - 1)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -368,7 +351,7 @@ class _ValueFilter:
         except Exception:
             return self._placeholder(value)
 
-    def _auto_decide(self, value: Any) -> Any:
+    def _snapshot_decide(self, value: Any) -> Any:
         if isinstance(value, ModuleType):
             name = getattr(value, "__name__", None)
             if name:
@@ -385,7 +368,7 @@ class _ValueFilter:
             return expanded
         # Dill also preserves imported functions by reference unless their
         # module is made unavailable to its locator. Force functions through
-        # the by-value payload path so auto mode does not create a dangling
+        # the by-value payload path so snapshot mode does not create a dangling
         # reference merely because plain pickle accepted it.
         if isinstance(value, FunctionType):
             blob = _dill_payload(value)
@@ -498,7 +481,7 @@ class _ValueFilter:
 
     def _nested_verdict(self, value: Any, depth: int) -> Any:
         """What :meth:`_nested` stores for ``value``, uncached."""
-        if self.auto:
+        if self.snapshot:
             expanded = self._expand_application_object(value, depth)
             if expanded is not _MISSING:
                 return expanded
@@ -526,11 +509,6 @@ class _ValueFilter:
             if expanded is not _MISSING:
                 return expanded
             return self._placeholder(value)
-        if self.name == "dill" and isinstance(value, FunctionType):
-            blob = _dill_payload(value)
-            if blob is not None:
-                self.dill_payloads.append(blob)
-                return _DillRef(len(self.dill_payloads) - 1)
         verdict = self._strict_decide(value)
         return value if verdict is None else verdict
 
