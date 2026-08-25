@@ -110,8 +110,8 @@ class ExceptionDump:
     ):
         self.exceptions = exceptions
         self.sources = sources
-        #: One dill stream holding the values plain pickle could not carry;
-        #: frames point into it with :class:`_DillRef`.
+        #: Independently loadable dill payloads for values plain pickle could
+        #: not carry; frames point into them with :class:`_DillRef`.
         self.dill_blob = dill_blob
         #: Identifier returned by :func:`dump_exception`; also the file name.
         self.trace_id = trace_id

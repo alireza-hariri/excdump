@@ -58,13 +58,14 @@ def _load_module_ref(name: str) -> Any:
 
 
 class _DillRef:
-    """Placeholder for a value that travels in the dump's shared dill blob.
+    """Placeholder for a value that travels in the dump's dill payloads.
 
-    Every value dill has to handle goes into *one* dill stream rather than a
-    blob each, because dill memoizes: ten functions from the same module share
-    one copy of what they reference, where ten separate blobs would each carry
-    their own. The frames hold these lightweight references, and
+    Every value dill has to handle goes into a small, independently loadable
+    payload. The frames hold lightweight references, and
     :func:`_resolve_dill_refs` swaps in the real objects after the dump loads.
+    Keeping payloads independent is important: framework objects often contain
+    cycles or callbacks that dill can write but cannot reconstruct. One such
+    value must not make every other function in the frame unreadable.
     """
 
     __slots__ = ("index",)
@@ -77,23 +78,53 @@ class _DillRef:
 
 
 def _resolve_dill_refs(dump: Any) -> None:
-    """Replace every :class:`_DillRef` in ``dump`` with its real value."""
+    """Replace every :class:`_DillRef` in ``dump`` with its real value.
+
+    Current dumps contain a pickle of individual dill payloads. Older dumps
+    contain one dill stream holding a list of values, so both formats are
+    accepted here. Loading each current payload separately prevents one
+    un-reconstructable object (a common occurrence with web framework graphs)
+    from poisoning otherwise perfectly usable functions and simple objects.
+    """
     blob = getattr(dump, "dill_blob", None)
     if not blob:
         return
     try:
-        values = dill.loads(blob)
+        decoded = dill.loads(blob)
     except Exception as error:
-        values = MissingRef("dill", f"blob ({type(error).__name__})")
+        values: Any = MissingRef("dill", f"blob ({type(error).__name__})")
+    else:
+        if (
+            isinstance(decoded, tuple)
+            and len(decoded) == 2
+            and decoded[0] == "excdump-dill-values-v2"
+            and isinstance(decoded[1], list)
+        ):
+            values = []
+            for index, payload in enumerate(decoded[1]):
+                try:
+                    values.append(dill.loads(payload))
+                except Exception as error:
+                    values.append(
+                        MissingRef("dill", f"value {index} ({type(error).__name__})")
+                    )
+        else:
+            # Format used before payloads were isolated. It is intentionally
+            # still supported for dumps already written by older releases.
+            values = decoded
+
     for record in getattr(dump, "exceptions", None) or []:
         for frame in getattr(record, "frames", None) or []:
             for scope in (frame.locals, frame.globals):
                 for key, value in list(scope.items()):
                     if type(value) is _DillRef:
-                        scope[key] = (
-                            values[value.index] if isinstance(values, list)
-                            else values  # the whole blob failed to load
-                        )
+                        if isinstance(values, list) and value.index < len(values):
+                            scope[key] = values[value.index]
+                        elif not isinstance(values, list):
+                            # The legacy shared blob failed as a whole.
+                            scope[key] = values
+                        else:
+                            scope[key] = MissingRef("dill", f"value {value.index}")
 
 
 #: Pickle writes a global reference as ``module`` + ``qualname``, so a stream
@@ -115,7 +146,11 @@ def _dill_payload(value: Any) -> Optional[bytes]:
 
     Neither setting wins in general, so both are tried and the smaller kept.
     Only values pickle already rejected get this far, so the doubled work is
-    bounded by how much dill was needed in the first place.
+    bounded by how much dill was needed in the first place. Each candidate is
+    also loaded once before it is accepted: dill can write some framework
+    graphs that it cannot reconstruct. The selected bytes are retained and
+    loaded independently after capture; this is deliberate, since one bad
+    framework object must not poison unrelated functions.
     """
     payloads = []
     for options in ({"recurse": True}, {}):
@@ -130,7 +165,15 @@ def _dill_payload(value: Any) -> Optional[bytes]:
                 )
         except Exception:
             continue
-    return min(payloads, key=len) if payloads else None
+    for payload in sorted(payloads, key=len):
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                dill.loads(payload)
+        except Exception:
+            continue
+        return payload
+    return None
 
 
 def _pickle_payload(value: Any) -> Optional[bytes]:
@@ -181,8 +224,9 @@ class _ValueFilter:
         self.auto = self.name == "auto"
         self.strict = SERIALIZERS[self.name]
         self.max_dill_bytes = CONFIG.max_dill_bytes if self.auto else 0
-        #: Values destined for the shared dill blob, in _DillRef index order.
-        self.dill_values: List[Any] = []
+        #: Individual dill payloads, in _DillRef index order. They are wrapped
+        #: in one small outer blob only to keep the dump model compact.
+        self.dill_payloads: List[bytes] = []
         self.verdicts: Dict[int, Any] = {}
         self.texts: Dict[str, str] = {}
         self.alive: List[Any] = []  # keeps ids unique for the capture's lifetime
@@ -233,10 +277,11 @@ class _ValueFilter:
         if blob is not None and (
             not self.max_dill_bytes or len(blob) <= self.max_dill_bytes
         ):
-            # The trial blob only proved dill can hold it and sized it against
-            # the cap; the value itself is written once, with all the others.
-            self.dill_values.append(value)
-            return _DillRef(len(self.dill_values) - 1)
+            # Retain the successful payload itself. Do not serialize all
+            # values into one dill graph: a single cyclic framework object can
+            # otherwise make unrelated functions impossible to load.
+            self.dill_payloads.append(blob)
+            return _DillRef(len(self.dill_payloads) - 1)
         if payload is not None:
             # dill is too expensive here; the pickled reference is better than
             # nothing, even though it may read back as MissingRef.
@@ -244,10 +289,18 @@ class _ValueFilter:
         return self._placeholder(value)
 
     def dill_blob(self) -> Optional[bytes]:
-        """One dill stream holding every value that needed dill, or ``None``."""
-        if not self.dill_values:
+        """Return independently loadable dill payloads, or ``None``.
+
+        The outer stream contains bytes, not the captured objects themselves.
+        Consequently a value that dill cannot reconstruct cannot invalidate the
+        payloads for all the other values in the dump.
+        """
+        if not self.dill_payloads:
             return None
-        return _dill_payload(self.dill_values)
+        return dill.dumps(
+            ("excdump-dill-values-v2", self.dill_payloads),
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
 
     def _placeholder(self, value: Any) -> str:
         try:

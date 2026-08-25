@@ -150,8 +150,9 @@ Each captured value is stored the cheapest way that keeps it, decided per value:
 - **plain pickle** if pickle can take it and the result will resolve wherever
   the dump is read;
 - otherwise **dill**, which handles functions, classes and closures pickle
-  refuses. Everything dill takes goes into one shared stream per dump, so ten
-  functions from one module carry that module's namespace once between them.
+  refuses. Dill-backed values are kept in independently loadable payloads, so
+  a framework object that dill can write but cannot reconstruct does not turn
+  every function in the frame into a placeholder.
   Both of dill's encodings are tried and the smaller kept: neither wins in
   general, and the one that lost by 8× on a batch of functions from one module
   won by 3× on a single decorated one.
