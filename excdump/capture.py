@@ -59,6 +59,49 @@ def _snapshot_frames(
     return snapshots
 
 
+def _live_up_frames(frame: Optional[FrameType], limit: int) -> List[Tuple[FrameType, int]]:
+    """Callers reachable from ``frame`` on the live stack, oldest first."""
+    frames: List[Tuple[FrameType, int]] = []
+    while frame is not None and len(frames) < limit:
+        frames.append((frame, frame.f_lineno))
+        frame = frame.f_back
+    frames.reverse()
+    return frames
+
+
+def _up_frames(
+    tb_frames: List[Tuple[FrameType, int]],
+    anchor_index: int,
+    first_up_frame: Optional[FrameType],
+    limit: int,
+) -> List[Tuple[FrameType, int]]:
+    """The ``limit`` callers just above the anchor, oldest first.
+
+    The traceback is the authority wherever it reaches: each entry called the
+    next, and it records the line each one was executing. The live stack is a
+    different chain, and not a superset -- a coroutine frame at the outer edge
+    of a task has no ``f_back`` at all. Walking ``f_back`` from an anchor below
+    a task boundary therefore loses every caller the traceback *does* name: the
+    frames holding the request and the context, replaced by asyncio's plumbing
+    or by nothing. So ``f_back`` is used only above the traceback's outermost
+    frame, which is the one region no traceback can describe.
+    """
+    if limit <= 0:
+        return []
+    if first_up_frame is not None:
+        # A caller hiding its own frames (:func:`dump_on_exception` and its
+        # wrapper) has told us where the chain resumes, and what it wants to
+        # hide *is* the traceback's outermost frame. Only the live stack knows
+        # what sits above that.
+        return _live_up_frames(first_up_frame, limit)
+    above = tb_frames[:anchor_index][-limit:]
+    outstanding = limit - len(above)
+    if outstanding:
+        # Ran out of traceback: keep going up the live stack from its top.
+        return _live_up_frames(tb_frames[0][0].f_back, outstanding) + above
+    return above
+
+
 def _chain_links(exc_value: BaseException) -> List[Tuple[BaseException, Optional[str]]]:
     """Walk a chain newest-first, pairing each exception with its older link."""
     links: List[Tuple[BaseException, Optional[str]]] = []
@@ -154,12 +197,7 @@ def dump_exception(
     anchor_lineno = tb_frames[anchor_index][1]
     down_frames = tb_frames[anchor_index + 1 : anchor_index + 1 + n_depth_down]
 
-    up_frames = []
-    frame = _first_up_frame if _first_up_frame is not None else anchor_frame.f_back
-    while frame is not None and len(up_frames) < n_depth_up:
-        up_frames.append((frame, frame.f_lineno))
-        frame = frame.f_back
-    up_frames.reverse()
+    up_frames = _up_frames(tb_frames, anchor_index, _first_up_frame, n_depth_up)
 
     primary = ExceptionRecord(
         exc_type=str(exc_type.__name__ if exc_type else "Unknown"),

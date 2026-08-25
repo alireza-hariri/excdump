@@ -131,7 +131,7 @@ class SourceStore:
             source_lines = []
         if source_lines:
             start = max(1, lineno - radius)
-            entry.add(start, [l.rstrip("\n") for l in source_lines[start - 1 : lineno + radius]])
+            entry.add(start, [line.rstrip("\n") for line in source_lines[start - 1 : lineno + radius]])
             self._remember(file_id, source_lines)
         return file_id
 
@@ -143,7 +143,7 @@ class SourceStore:
         """
         if file_id in self.manifest:
             return
-        lines = [l.rstrip("\n") for l in source_lines]
+        lines = [line.rstrip("\n") for line in source_lines]
         text = "\n".join(lines)
         if CONFIG.max_source_bytes and len(text) > CONFIG.max_source_bytes:
             return  # The window inside the dump still covers the failing lines.

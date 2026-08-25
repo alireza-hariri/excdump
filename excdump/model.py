@@ -156,17 +156,97 @@ class MissingRef:
     Frames commonly capture module-level names; when a dump is inspected
     somewhere the defining module is absent or has changed, that should degrade
     to a visible placeholder rather than making the whole dump unloadable.
+    Pickle still writes an unavailable instance's state, so retain it: the class
+    is gone, but its captured fields are often the most useful part of the value.
     """
 
     def __init__(self, module: str, name: str):
         self.module = module
         self.name = name
+        self._state = {}
 
     def __call__(self, *args: Any, **kwargs: Any) -> "MissingRef":
         return self
 
+    def __getattr__(self, name: str) -> Any:
+        state = self.__dict__.get("_state", {})
+        if name in state:
+            return state[name]
+        raise AttributeError(name)
+
     def __setstate__(self, state: Any) -> None:
-        pass
+        """Keep instance state even though the original class is unavailable."""
+        if isinstance(state, dict):
+            nested = state.get("__dict__")
+            if isinstance(nested, dict):
+                state = nested
+            self._state.update(state)
 
     def __repr__(self) -> str:
         return f"<Unavailable {self.module}.{self.name}>"
+
+
+class MissingModuleDict(dict):
+    """Stand-in for the ``__dict__`` of a module this process cannot import.
+
+    dill stores a function whose ``__globals__`` *is* a module's ``__dict__``
+    as a reference to that dict, so a function from a module the inspector
+    lacks arrives as ``somemodule.__dict__``. That is a value a reconstructor
+    consumes -- ``FunctionType`` requires a real dict for its globals -- and
+    not, like most unresolvable references, a class used to rebuild something.
+    Standing in with a class raises *while unpickling* and loses the whole
+    dump, so this stands in with a dict instead: the function is rebuilt and
+    stays readable, and only calling it can fail on a name that is not there.
+    """
+
+    def __init__(self, module: str):
+        super().__init__(__name__=module)
+        self.module = module
+
+    def __repr__(self) -> str:
+        return f"<Unavailable {self.module}.__dict__>"
+
+
+class ValueSnapshot:
+    """A value kept as its type, repr and attributes rather than as itself.
+
+    Reached when neither serializer can carry the object across processes: an
+    instance of a ``__main__`` class (a pydantic model in the application's
+    entry script, say) pickles only as a reference that resolves to nothing in
+    the inspector, and dill refuses many framework objects outright. Storing
+    the *shape* -- the attributes, each filtered in turn -- keeps the data the
+    frame actually held readable, where the alternatives are
+    :class:`MissingRef` or one long repr string.
+
+    Attributes are reached normally (``snapshot.user.name``), so inspecting a
+    snapshot reads like inspecting the original object.
+    """
+
+    __slots__ = ("type_name", "repr_text", "attrs")
+
+    def __init__(self, type_name: str, repr_text: str, attrs: Dict[str, Any]):
+        self.type_name = type_name
+        self.repr_text = repr_text
+        self.attrs = attrs
+
+    def __getattr__(self, name: str) -> Any:
+        # Only called for names the slots do not answer, i.e. the captured
+        # attributes. Unpickling probes dunders before `attrs` is set, so a
+        # missing slot has to read as a plain absent attribute.
+        try:
+            attrs = object.__getattribute__(self, "attrs")
+        except AttributeError:
+            raise AttributeError(name) from None
+        try:
+            return attrs[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __dir__(self) -> List[str]:
+        return sorted(set(self.__slots__) | set(self.attrs))
+
+    def __repr__(self) -> str:
+        if self.repr_text:
+            return f"<{self.type_name} snapshot: {self.repr_text}>"
+        listed = ", ".join(self.attrs)
+        return f"<{self.type_name} snapshot: {listed}>"

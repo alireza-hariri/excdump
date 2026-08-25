@@ -151,9 +151,11 @@ def dispatch(session: DebuggerSession, line: str) -> Tuple[str, bool]:
 def plain_loop(session: DebuggerSession) -> None:
     """Readline-based fallback used when the TUI cannot run (e.g. no tty)."""
     try:
-        import readline  # noqa: F401  (enables history and line editing)
+        import readline
     except ImportError:
         pass
+    else:
+        del readline
 
     print("=" * 70)
     print(f"Offline debugger: {session.record.title()}")
@@ -221,8 +223,9 @@ id prefix, a path id (opens that path's newest dump), or no argument at all
 Options:
   --trace-id <id> Trace id to inspect, when a flag reads better than a positional
   --store <dir>   Dump store to use (default: $EXCDUMP_DIR or ./.exception_dumps)
-  --pickle        Write dumps with strict pickle instead of the default "auto"
-                  (per-value pickle, dill only where pickle fails; demo only)
+  --snapshot      Use the smaller snapshot serializer instead of the default dill
+                  mode (demo only)
+  --pickle        Write dumps with strict pickle (demo only)
   --plain         Force the readline inspector instead of the TUI
 
 ``gc`` drops whole exception paths nothing has hit for
@@ -280,12 +283,13 @@ def list_command(store: DumpStore, pid: Optional[str] = None) -> int:
 def _demo() -> int:
     """Capture a chained exception so the inspector has something to walk."""
     def calculate_tax(amount, rate_fn):
-        multiplier = rate_fn(amount)
+        rate_fn(amount)
         return amount / 0  # Intentional crash.
 
     def process_order(user_id, item_price):
-        calc_rate = lambda val: 0.15 if val > 100 else 0.05
-        order_data = {"user": user_id, "price": item_price}
+        def calc_rate(val):
+            return 0.15 if val > 100 else 0.05
+
         try:
             return calculate_tax(item_price, calc_rate)
         except ZeroDivisionError as error:
@@ -299,7 +303,7 @@ def _demo() -> int:
     try:
         handle_checkout()
     except Exception:
-        trace_id = dump_exception(n_depth_up=1, n_depth_down=1, metadata={"demo": True})
+        trace_id = dump_exception(n_depth_up=1, n_depth_down=2, metadata={"demo": True})
 
     print(f"trace id: {trace_id}")
     print(f"Run 'python -m excdump inspect {trace_id}' to debug.")
@@ -334,6 +338,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = argv[1:]
     if "--pickle" in args:
         set_serializer("pickle")
+    elif "--snapshot" in args:
+        set_serializer("snapshot")
     if "--store" in args:
         index = args.index("--store")
         if index + 1 >= len(args):

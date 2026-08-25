@@ -158,15 +158,38 @@ Each captured value is stored the cheapest way that keeps it, decided per value:
   won by 3× on a single decorated one.
 - **modules** are stored by name and re-imported on load, rather than pickled
   whole;
+- otherwise the value's **shape**: a container keeps its elements and an object
+  keeps its attributes, each stored by these same rules in turn. This is what a
+  pydantic model defined in your entry script gets — pickle can only write a
+  `__main__.User` reference that resolves to nothing in the inspector, and dill
+  refuses the model class outright, so the fields themselves are kept instead:
+
+  ```
+  (exc-dbg) user
+  <User snapshot: User(id=1, name='Grace')>
+  (exc-dbg) user.name
+  'Grace'
+  (exc-dbg) context["request"].user.id
+  3
+  ```
+
+  Attributes read normally, so inspecting a snapshot reads like inspecting the
+  original. Expansion is bounded by `max_expand_depth` and `max_expand_items`,
+  and cycles — the norm in framework object graphs — terminate;
 - anything left becomes a capped `repr`, visible as a placeholder rather than a
   failed load.
 
+A value is never stored as a reference that only resolves in the process that
+wrote it. Such a reference reads back as `<Unavailable __main__.User>` at best,
+and where the value is rebuilt *through* the missing class, unpickling raises
+and the whole dump is lost.
+
 A dump that cannot be fully reconstructed still opens. A class this machine
 cannot import shows as `<Unavailable pkg.Thing>` and everything around it still
-reads.
+reads. A function from a module that is gone keeps its code and shows
+`<Unavailable pkg.__dict__>` for its globals — readable, though calling it will
+raise on the names that went with the module.
 
-Set `serializer` to `"dill"` to send everything through dill (much larger), or
-`"pickle"` to drop whatever pickle will not take.
 
 ## Configuration
 
@@ -190,11 +213,13 @@ raised — a bad environment variable must not stop an app from starting.
 | `max_path_age_days` | 14 | age at which a whole path is dropped; 0 keeps forever |
 | `gc_interval_seconds` | 3600 | how often capture sweeps; 0 leaves it to `gc` |
 | `n_depth_up` | 5 | caller frames captured above the handling frame |
-| `n_depth_down` | 5 | traceback frames captured below it |
-| `serializer` | `"auto"` | `"auto"`, `"dill"` or `"pickle"` |
+| `n_depth_down` | 10 | traceback frames captured below it |
+| `serializer` | `"dill"` | `"snapshot"`, `"dill"` or `"pickle"` |
 | `source_radius` | 5 | lines kept either side of each captured line |
 | `max_repr_chars` | 2000 | cap on a stored `repr` |
 | `max_dill_bytes` | 65536 | backstop on one dill-serialized value |
+| `max_expand_depth` | 3 | how deep a value is kept by shape; 0 disables |
+| `max_expand_items` | 100 | elements kept per expanded container; 0 keeps all |
 | `max_source_bytes` | 1000000 | cap on a captured file's stored text |
 | `enabled` | `True` | master switch |
 | `on_dump` | `None` | callback given each trace id |
