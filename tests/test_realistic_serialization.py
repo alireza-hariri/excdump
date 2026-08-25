@@ -65,7 +65,12 @@ def frame(tmp_path):
         [sys.executable, str(app)],
         check=True,
         capture_output=True,
-        env={"PATH": "/usr/bin", "EXCDUMP_DIR": str(store)},
+        env={
+            "PATH": "/usr/bin",
+            "EXCDUMP_DIR": str(store),
+            # These assertions cover snapshot mode's structural fallback.
+            "EXCDUMP_SERIALIZER": "snapshot",
+        },
     )
     dump = load_dump(str(next(store.glob("*/*.dump"))))
     return next(frame for frame in dump.frames if frame.name == "fail")

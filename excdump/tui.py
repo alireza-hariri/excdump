@@ -23,9 +23,11 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import (
+    ConditionalContainer,
     Float,
     FloatContainer,
     HSplit,
@@ -40,6 +42,7 @@ from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style
+from prompt_toolkit.filters import Condition
 
 from .cli import COMMANDS, dispatch, help_text
 from .session import DebuggerSession
@@ -189,7 +192,7 @@ class DebuggerTUI:
             BufferControl(buffer=self.output_buffer, focusable=False, lexer=OutputLexer()),
             wrap_lines=True,
             always_hide_cursor=True,
-            height=D(min=3, preferred=9),
+            height=D(min=3, preferred=15, weight=1),
         )
         self.input_window = Window(
             BufferControl(buffer=self.input_buffer),
@@ -198,7 +201,14 @@ class DebuggerTUI:
         )
 
         stack_window = Window(
-            FormattedTextControl(self._stack_text, focusable=False),
+            FormattedTextControl(
+                self._stack_text,
+                focusable=False,
+                # A non-focusable control does not normally have a cursor,
+                # so prompt-toolkit cannot keep its current row in view.  Use
+                # an invisible cursor position as the scroll anchor instead.
+                get_cursor_position=self._stack_cursor_position,
+            ),
             wrap_lines=False,
             height=D(min=3),
         )
@@ -211,19 +221,30 @@ class DebuggerTUI:
             [
                 self._pane_title("frames"),
                 stack_window,
-                Window(char="─", height=1, style="class:separator"),
-                self._pane_title("locals"),
-                locals_window,
+                ConditionalContainer(
+                    HSplit(
+                        [
+                            Window(char="─", height=1, style="class:separator"),
+                            self._pane_title("locals"),
+                            locals_window,
+                        ]
+                    ),
+                    filter=Condition(self._show_locals),
+                ),
             ]
         )
 
         side_width = D(min=28, preferred=44, weight=1)
         body = VSplit(
             [
-                HSplit([self._pane_title("source"), self.source_window], width=D(weight=2)),
+                HSplit(
+                    [self._pane_title("source"), self.source_window],
+                    width=D(weight=2),
+                ),
                 Window(char="│", width=1, style="class:separator"),
                 HSplit([side], width=side_width),
-            ]
+            ],
+            height=D(min=3, preferred=20, max=22),
         )
 
         root = HSplit(
@@ -247,6 +268,13 @@ class DebuggerTUI:
                 )
             ],
         )
+
+    def _show_locals(self) -> bool:
+        """Show locals only when the terminal has room for a useful panel."""
+        app = getattr(self, "app", None)
+        if app is None:
+            return True
+        return app.output.get_size().rows >= 24
 
     @staticmethod
     def _pane_title(text: str) -> Window:
@@ -281,7 +309,7 @@ class DebuggerTUI:
         return [
             (
                 "class:toolbar",
-                " ↑↓ history   ⇥ complete   M-↑/M-↓ frame   M-←/M-→ exception   "
+                " ↑↓ history   ⇥ complete   M-/S-↑↓ frame   M-/S-←→ exception   "
                 "PgUp/PgDn source   ^L clear   ^D quit ",
             )
         ]
@@ -306,6 +334,19 @@ class DebuggerTUI:
             fragments.append(("class:stack.index", f" {'>' if current else ' '}[{index}] "))
             fragments.append((style, f"{text}\n"))
         return fragments
+
+    def _stack_cursor_position(self) -> Point:
+        """Return the row containing the selected frame.
+
+        ``FormattedTextControl`` is otherwise rendered from the top whenever
+        its content is taller than the frames pane.  Giving the window a
+        cursor position makes prompt-toolkit apply its normal scroll logic,
+        keeping the selected frame visible after frame/exception changes.
+        """
+        row = self.session.curindex
+        if len(self.session.records) > 1:
+            row += len(self.session.records) + 1  # exception rows and divider
+        return Point(x=0, y=max(0, row))
 
     def _locals_text(self):
         frame = self.session.curframe
@@ -403,21 +444,25 @@ class DebuggerTUI:
             self._set_buffer(self.output_buffer, "", 0)
 
         @keys.add("escape", "up")
+        @keys.add("s-up")
         def _(event):
             self._log(self.session.frame_up())
             self.refresh()
 
         @keys.add("escape", "down")
+        @keys.add("s-down")
         def _(event):
             self._log(self.session.frame_down())
             self.refresh()
 
         @keys.add("escape", "left")
+        @keys.add("s-left")
         def _(event):
             self._log(self.session.exception_up())
             self.refresh()
 
         @keys.add("escape", "right")
+        @keys.add("s-right")
         def _(event):
             self._log(self.session.exception_down())
             self.refresh()

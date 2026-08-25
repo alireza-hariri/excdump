@@ -190,9 +190,6 @@ reads. A function from a module that is gone keeps its code and shows
 `<Unavailable pkg.__dict__>` for its globals — readable, though calling it will
 raise on the names that went with the module.
 
-Set `serializer` to `"dill"` to send everything through dill (much larger), or
-`"pickle"` to drop whatever pickle will not take. The default `"snapshot"` mode
-uses pickle where possible and dill only for values pickle cannot store.
 
 ## Configuration
 
@@ -217,7 +214,7 @@ raised — a bad environment variable must not stop an app from starting.
 | `gc_interval_seconds` | 3600 | how often capture sweeps; 0 leaves it to `gc` |
 | `n_depth_up` | 5 | caller frames captured above the handling frame |
 | `n_depth_down` | 10 | traceback frames captured below it |
-| `serializer` | `"snapshot"` | `"snapshot"`, `"dill"` or `"pickle"` |
+| `serializer` | `"dill"` | `"snapshot"`, `"dill"` or `"pickle"` |
 | `source_radius` | 5 | lines kept either side of each captured line |
 | `max_repr_chars` | 2000 | cap on a stored `repr` |
 | `max_dill_bytes` | 65536 | backstop on one dill-serialized value |

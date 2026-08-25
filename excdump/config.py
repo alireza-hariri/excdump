@@ -111,11 +111,11 @@ class Config(BaseModel):
     n_depth_up: int = Field(default_factory=lambda: _env("DEPTH_UP", 5, int), ge=0)
     #: Traceback frames captured below the handling frame.
     n_depth_down: int = Field(default_factory=lambda: _env("DEPTH_DOWN", 10, int), ge=0)
-    #: ``"snapshot"`` (pickle per value, dill only where pickle fails), ``"dill"``
-    #: (captures more, much larger) or ``"pickle"`` (smallest, drops what
-    #: pickle cannot take).
+    #: ``"dill"`` (captures values by value), ``"snapshot"`` (pickle per
+    #: value, dill only where pickle fails) or ``"pickle"`` (smallest, drops
+    #: what pickle cannot take).
     serializer: SerializerName = Field(
-        default_factory=lambda: _env("SERIALIZER", "snapshot", _env_serializer)
+        default_factory=lambda: _env("SERIALIZER", "dill", _env_serializer)
     )
     #: Lines of source kept above and below each captured line.
     source_radius: int = Field(default_factory=lambda: _env("SOURCE_RADIUS", 5, int), ge=0)
@@ -217,10 +217,11 @@ def configure(
 def set_serializer(name: SerializerName) -> None:
     """Select how new dumps serialize captured values.
 
-    ``"snapshot"`` (the default) tries plain pickle for each value and falls back
-    to dill only for the ones pickle rejects, which is both the smallest option
-    that loses nothing pickle could have kept and much smaller than ``"dill"``
-    -- see :class:`_ValueFilter` for why dill is expensive.
+    ``"dill"`` (the default) runs everything through dill, capturing lambdas,
+    local classes and ``__main__``-defined objects by value. ``"snapshot"``
+    tries plain pickle for each value and falls back to dill only for the ones
+    pickle rejects, which is smaller but less complete -- see
+    :class:`_ValueFilter` for why dill is expensive.
 
     ``"dill"`` runs everything through dill, capturing lambdas, local classes
     and ``__main__``-defined objects by value at a large size cost. ``"pickle"``
