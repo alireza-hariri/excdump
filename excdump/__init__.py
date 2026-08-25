@@ -52,14 +52,10 @@ from .cli import (
 )
 from .config import (
     CONFIG,
-    SERIALIZERS,
     Config,
     SerializerName,
-    Unset,
-    UNSET,
     configure,
     get_serializer,
-    logger,
     set_serializer,
 )
 from .loading import load_dump
@@ -71,20 +67,10 @@ from .model import (
     MissingRef,
     ValueSnapshot,
 )
-from .paths import (
-    DUMP_SUFFIX,
-    PATH_META,
-    SOURCE_DIR,
-    SOURCE_SUFFIX,
-    exception_path,
-    path_id,
-    relative_path,
-    trace_path_id,
-)
+from .paths import exception_path, path_id, relative_path, trace_path_id
 from .session import DebuggerSession
 from .sources import SourceFile, SourceStore
 from .store import DumpStore, default_store, resolve_dump
-from .values import _DillRef, _ModuleRef, _ValueFilter
 
 __all__ = [
     "CONFIG",

@@ -151,9 +151,11 @@ def dispatch(session: DebuggerSession, line: str) -> Tuple[str, bool]:
 def plain_loop(session: DebuggerSession) -> None:
     """Readline-based fallback used when the TUI cannot run (e.g. no tty)."""
     try:
-        import readline  # noqa: F401  (enables history and line editing)
+        import readline
     except ImportError:
         pass
+    else:
+        del readline
 
     print("=" * 70)
     print(f"Offline debugger: {session.record.title()}")
@@ -280,12 +282,13 @@ def list_command(store: DumpStore, pid: Optional[str] = None) -> int:
 def _demo() -> int:
     """Capture a chained exception so the inspector has something to walk."""
     def calculate_tax(amount, rate_fn):
-        multiplier = rate_fn(amount)
+        rate_fn(amount)
         return amount / 0  # Intentional crash.
 
     def process_order(user_id, item_price):
-        calc_rate = lambda val: 0.15 if val > 100 else 0.05
-        order_data = {"user": user_id, "price": item_price}
+        def calc_rate(val):
+            return 0.15 if val > 100 else 0.05
+
         try:
             return calculate_tax(item_price, calc_rate)
         except ZeroDivisionError as error:
