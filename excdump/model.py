@@ -156,17 +156,31 @@ class MissingRef:
     Frames commonly capture module-level names; when a dump is inspected
     somewhere the defining module is absent or has changed, that should degrade
     to a visible placeholder rather than making the whole dump unloadable.
+    Pickle still writes an unavailable instance's state, so retain it: the class
+    is gone, but its captured fields are often the most useful part of the value.
     """
 
     def __init__(self, module: str, name: str):
         self.module = module
         self.name = name
+        self._state = {}
 
     def __call__(self, *args: Any, **kwargs: Any) -> "MissingRef":
         return self
 
+    def __getattr__(self, name: str) -> Any:
+        state = self.__dict__.get("_state", {})
+        if name in state:
+            return state[name]
+        raise AttributeError(name)
+
     def __setstate__(self, state: Any) -> None:
-        pass
+        """Keep instance state even though the original class is unavailable."""
+        if isinstance(state, dict):
+            nested = state.get("__dict__")
+            if isinstance(nested, dict):
+                state = nested
+            self._state.update(state)
 
     def __repr__(self) -> str:
         return f"<Unavailable {self.module}.{self.name}>"

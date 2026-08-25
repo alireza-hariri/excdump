@@ -8,7 +8,7 @@ per value; see its docstring for the rules.
 import pickle
 import sys
 import warnings
-from types import ModuleType
+from types import FunctionType, MethodType, ModuleType
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import dill
@@ -185,6 +185,34 @@ def _replace_dill_refs(value: Any, values: Any, seen: Dict[int, Any]) -> Any:
 _MAIN_REF = b"__main__"
 
 
+def _by_value_function(value: Any) -> Any:
+    """Make a function look non-locatable so dill writes its code.
+
+    Dill deliberately stores an imported function by module reference, even
+    with ``recurse=True``. That is efficient but useless in an offline dump
+    after the application module has disappeared. A shallow function copy with
+    a private globals dict and ``__main__`` module marker makes dill take the
+    function by value while leaving the live application object untouched.
+    """
+    if not isinstance(value, FunctionType):
+        return value
+    globals_dict = dict(value.__globals__)
+    globals_dict["__name__"] = "__main__"
+    copied = FunctionType(
+        value.__code__,
+        globals_dict,
+        value.__name__,
+        value.__defaults__,
+        value.__closure__,
+    )
+    copied.__kwdefaults__ = value.__kwdefaults__
+    copied.__annotations__ = value.__annotations__
+    copied.__dict__.update(value.__dict__)
+    copied.__qualname__ = value.__qualname__
+    copied.__module__ = "__main__"
+    return copied
+
+
 def _dill_payload(value: Any) -> Optional[bytes]:
     """Smallest dill encoding of ``value``, or ``None`` if dill refused it.
 
@@ -205,6 +233,7 @@ def _dill_payload(value: Any) -> Optional[bytes]:
     framework object must not poison unrelated functions.
     """
     payloads = []
+    value_for_dill = _by_value_function(value)
     for options in ({"recurse": True}, {}):
         try:
             # Trial runs are diagnostics: dill warns loudly about values it
@@ -213,7 +242,7 @@ def _dill_payload(value: Any) -> Optional[bytes]:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 payloads.append(
-                    dill.dumps(value, protocol=pickle.HIGHEST_PROTOCOL, **options)
+                    dill.dumps(value_for_dill, protocol=pickle.HIGHEST_PROTOCOL, **options)
                 )
         except Exception:
             continue
@@ -314,6 +343,23 @@ class _ValueFilter:
 
     def _strict_decide(self, value: Any) -> Any:
         """One serializer, take it or leave it: the ``"dill"``/``"pickle"`` modes."""
+        # Dill serializes ordinary modules through its private
+        # ``_import_module`` reducer. If the application module is absent at
+        # inspection time, that reducer raises before our tolerant
+        # ``find_class`` hook gets a chance to replace it. Use the portable
+        # name wrapper in every mode, just as auto mode does.
+        if isinstance(value, ModuleType):
+            name = getattr(value, "__name__", None)
+            if name:
+                return _ModuleRef(name)
+        expanded = self._expand_application_object(value)
+        if expanded is not _MISSING:
+            return expanded
+        if self.name == "dill" and isinstance(value, FunctionType):
+            blob = _dill_payload(value)
+            if blob is not None:
+                self.dill_payloads.append(blob)
+                return _DillRef(len(self.dill_payloads) - 1)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -327,6 +373,27 @@ class _ValueFilter:
             name = getattr(value, "__name__", None)
             if name:
                 return _ModuleRef(name)
+
+        # A successful pickle of an application object is only a reference to
+        # its class. That reference is not portable: the inspector commonly
+        # runs after a deploy, without the application's package on its path.
+        # Keep the state by shape before accepting such a reference. This is
+        # deliberately limited to stateful instances; modules, functions and
+        # ordinary library values still use their normal serializer paths.
+        expanded = self._expand_application_object(value)
+        if expanded is not _MISSING:
+            return expanded
+        # Dill also preserves imported functions by reference unless their
+        # module is made unavailable to its locator. Force functions through
+        # the by-value payload path so auto mode does not create a dangling
+        # reference merely because plain pickle accepted it.
+        if isinstance(value, FunctionType):
+            blob = _dill_payload(value)
+            if blob is not None and (
+                not self.max_dill_bytes or len(blob) <= self.max_dill_bytes
+            ):
+                self.dill_payloads.append(blob)
+                return _DillRef(len(self.dill_payloads) - 1)
 
         payload = _pickle_payload(value)
         if payload is not None and _MAIN_REF not in payload:
@@ -432,6 +499,16 @@ class _ValueFilter:
     def _nested_verdict(self, value: Any, depth: int) -> Any:
         """What :meth:`_nested` stores for ``value``, uncached."""
         if self.auto:
+            expanded = self._expand_application_object(value, depth)
+            if expanded is not _MISSING:
+                return expanded
+            if isinstance(value, FunctionType):
+                blob = _dill_payload(value)
+                if blob is not None and (
+                    not self.max_dill_bytes or len(blob) <= self.max_dill_bytes
+                ):
+                    self.dill_payloads.append(blob)
+                    return _DillRef(len(self.dill_payloads) - 1)
             if isinstance(value, ModuleType):
                 name = getattr(value, "__name__", None)
                 if name:
@@ -449,8 +526,29 @@ class _ValueFilter:
             if expanded is not _MISSING:
                 return expanded
             return self._placeholder(value)
+        if self.name == "dill" and isinstance(value, FunctionType):
+            blob = _dill_payload(value)
+            if blob is not None:
+                self.dill_payloads.append(blob)
+                return _DillRef(len(self.dill_payloads) - 1)
         verdict = self._strict_decide(value)
         return value if verdict is None else verdict
+
+    def _expand_application_object(self, value: Any, depth: int = 1) -> Any:
+        """Snapshot a stateful user object instead of storing a class reference.
+
+        Pickle and dill both represent a normally importable class instance by
+        module and class name. That is compact, but it becomes ``MissingRef``
+        after the application is redeployed or inspected on another machine.
+        The instance state is the useful part of a crash dump, so preserve it
+        structurally before either serializer gets to choose that reference.
+        """
+        if isinstance(value, (ModuleType, FunctionType, MethodType, type)):
+            return _MISSING
+        attrs = self._attributes(value)
+        if attrs is None:
+            return _MISSING
+        return self._expand(value, depth)
 
     @staticmethod
     def _attributes(value: Any) -> Optional[List[Any]]:
