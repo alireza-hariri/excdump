@@ -41,4 +41,7 @@ packages = ["excdump"]
 include = ["excdump", "README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
-dev = ["pyflakes>=3.4"]
+dev = [
+    "pyflakes>=3.4",
+    "pytest>=9.1.1",
+]

@@ -6,13 +6,14 @@ visible placeholder instead of making the whole file unreadable.
 """
 
 import gzip
+import io
 import os
 import pickle
 from typing import Any
 
 import dill
 
-from .model import ExceptionDump, MissingRef, _normalize_dump
+from .model import ExceptionDump, MissingModuleDict, MissingRef, _normalize_dump
 from .values import _resolve_dill_refs
 
 
@@ -26,6 +27,10 @@ def _tolerant_unpickler(module: Any) -> Any:
             try:
                 return super().find_class(module_name, name)
             except Exception:
+                if name == "__dict__":
+                    # A module's own dict, referenced by a dill-stored function
+                    # as its globals. Only a dict can play that role.
+                    return MissingModuleDict(module_name)
                 # A missing global can be either a value or the class used by
                 # NEWOBJ/NEWOBJ_EX to rebuild a value.  Returning a MissingRef
                 # instance works for the former, but pickle requires the
@@ -49,6 +54,11 @@ def _tolerant_unpickler(module: Any) -> Any:
     return Unpickler
 
 
+def _tolerant_loads(payload: bytes) -> Any:
+    """Load one dill payload, degrading names this process cannot import."""
+    return _tolerant_unpickler(dill)(io.BytesIO(payload)).load()
+
+
 def load_dump(filepath: str) -> ExceptionDump:
     """Load a dump written by either serializer (and older uncompressed ones).
 
@@ -66,7 +76,7 @@ def load_dump(filepath: str) -> ExceptionDump:
         except Exception as error:
             errors.append(f"{module.__name__}: {error}")
             continue
-        _resolve_dill_refs(dump)
+        _resolve_dill_refs(dump, _tolerant_loads)
         # The dump names its source by hash; the blobs sit next to it.
         sources = getattr(dump, "sources", None)
         if sources is not None and hasattr(sources, "attach"):

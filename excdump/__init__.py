@@ -67,7 +67,9 @@ from .model import (
     ExceptionDump,
     ExceptionRecord,
     FrameSnapshot,
+    MissingModuleDict,
     MissingRef,
+    ValueSnapshot,
 )
 from .paths import (
     DUMP_SUFFIX,
@@ -93,7 +95,9 @@ __all__ = [
     "ExceptionDump",
     "ExceptionRecord",
     "FrameSnapshot",
+    "MissingModuleDict",
     "MissingRef",
+    "ValueSnapshot",
     "OfflinePdb",
     "SerializerName",
     "SourceFile",

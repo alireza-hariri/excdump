@@ -128,6 +128,20 @@ class Config(BaseModel):
     max_dill_bytes: int = Field(
         default_factory=lambda: _env("MAX_DILL_BYTES", 65536, int), ge=0
     )
+    #: How deep ``"auto"`` expands a value neither serializer can carry
+    #: portably. Expansion keeps such a value readable -- an object becomes its
+    #: attributes, a container its elements -- instead of a repr string or a
+    #: MissingRef, but an attribute graph reaches the whole process if nothing
+    #: stops it, so it is bounded. 0 disables expansion.
+    max_expand_depth: int = Field(
+        default_factory=lambda: _env("MAX_EXPAND_DEPTH", 3, int), ge=0
+    )
+    #: Elements kept per container while expanding; the rest become a count.
+    #: Bounds what one large request body or query result adds to a dump.
+    #: 0 keeps every element.
+    max_expand_items: int = Field(
+        default_factory=lambda: _env("MAX_EXPAND_ITEMS", 100, int), ge=0
+    )
     #: Largest file whose full text is kept in the per-path source sidecar.
     #: Bigger files fall back to the line window inside the dump, which still
     #: shows the failing lines but cannot be scrolled. 0 stores every file.
@@ -180,6 +194,8 @@ def configure(
     serializer: Union[SerializerName, Unset] = UNSET,
     source_radius: Union[int, Unset] = UNSET,
     max_repr_chars: Union[int, Unset] = UNSET,
+    max_expand_depth: Union[int, Unset] = UNSET,
+    max_expand_items: Union[int, Unset] = UNSET,
     enabled: Union[bool, Unset] = UNSET,
     on_dump: Union[Callable[[str], None], None, Unset] = UNSET,
     verbose: Union[bool, Unset] = UNSET,
