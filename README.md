@@ -215,7 +215,7 @@ raised — a bad environment variable must not stop an app from starting.
 | `max_path_age_days` | 14 | age at which a whole path is dropped; 0 keeps forever |
 | `gc_interval_seconds` | 3600 | how often capture sweeps; 0 leaves it to `gc` |
 | `n_depth_up` | 5 | caller frames captured above the handling frame |
-| `n_depth_down` | 5 | traceback frames captured below it |
+| `n_depth_down` | 10 | traceback frames captured below it |
 | `serializer` | `"auto"` | `"auto"`, `"dill"` or `"pickle"` |
 | `source_radius` | 5 | lines kept either side of each captured line |
 | `max_repr_chars` | 2000 | cap on a stored `repr` |

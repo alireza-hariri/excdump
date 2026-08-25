@@ -110,7 +110,7 @@ class Config(BaseModel):
     #: Caller frames captured above the handling frame.
     n_depth_up: int = Field(default_factory=lambda: _env("DEPTH_UP", 5, int), ge=0)
     #: Traceback frames captured below the handling frame.
-    n_depth_down: int = Field(default_factory=lambda: _env("DEPTH_DOWN", 5, int), ge=0)
+    n_depth_down: int = Field(default_factory=lambda: _env("DEPTH_DOWN", 10, int), ge=0)
     #: ``"auto"`` (pickle per value, dill only where pickle fails), ``"dill"``
     #: (captures more, much larger) or ``"pickle"`` (smallest, drops what
     #: pickle cannot take).

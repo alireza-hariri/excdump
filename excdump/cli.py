@@ -299,7 +299,7 @@ def _demo() -> int:
     try:
         handle_checkout()
     except Exception:
-        trace_id = dump_exception(n_depth_up=1, n_depth_down=1, metadata={"demo": True})
+        trace_id = dump_exception(n_depth_up=1, n_depth_down=2, metadata={"demo": True})
 
     print(f"trace id: {trace_id}")
     print(f"Run 'python -m excdump inspect {trace_id}' to debug.")

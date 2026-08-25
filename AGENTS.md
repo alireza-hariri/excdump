@@ -25,5 +25,5 @@ If `uv` is unavailable, use the venv:
 .venv/bin/activate/pytest
 ```
 
-To publish a release to PyPI, run `uv build` and then `uvx twine upload dist/*`.
+To publish a release to PyPI, run `uv build`, bump the version and then `uvx twine upload dist/*`.
 
