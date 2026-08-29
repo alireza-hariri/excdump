@@ -1,12 +1,10 @@
 # excdump
 
 Capture everything about an exception the moment it happens, then debug it later
-on your own machine — with the frames, the locals, related globals, and the source as they were.
+on your own machine — with the frames, the locals, related globals, and the source files as they were.
 
-A traceback tells you where a program failed. It does not tell you what `order`
-held, what `rate` had been computed to, or what the file looked like before you
-edited it. `excdump` writes all of that to a file at the moment of failure, and
-gives you an offline debugger to walk it afterwards.
+A traceback tells you where a program failed. It does not store variables, and it's hard to understand `excdump` writes the exception to a file at the moment of failure, and
+gives you an offline debugger to walk it later.
 
 ```python
 from excdump import dump_exception
