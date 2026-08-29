@@ -19,8 +19,28 @@ except Exception:
 ```
 
 ```console
-$ excdump inspect <trace-id>
+$ uv run excdump inspect <trace-id>
 ```
+
+## Quick start
+
+1. Add `excdump` to your project:
+
+   ```console
+   $ uv add excdump
+   ```
+
+2. Create a demo dump in the store you choose:
+
+   ```console
+   $ uv run excdump demo --store ./exception-dumps
+   ```
+
+3. Inspect the last exception in the store (or use `trace-id` to inspect specific exception):
+
+   ```console
+   $ uv run excdump inspect --store ./exception-dumps
+   ```
 
 ## Install
 
@@ -36,12 +56,11 @@ This makes the capture API available to your application:
 from excdump import dump_exception
 ```
 
-To install the command-line tool globally in an isolated environment:
+Run the command-line tool with uv:
 
 ```console
-$ uv tool install excdump
-$ excdump demo
-$ excdump inspect
+$ uv run excdump demo
+$ uv run excdump inspect
 ```
 
 Requires Python 3.11+.
@@ -83,11 +102,11 @@ of each file involved.
 ## Inspecting
 
 ```console
-$ excdump list                 # what the store holds, grouped by failure
-$ excdump inspect              # the most recent dump
-$ excdump inspect <trace-id>   # a specific one; a unique prefix works
-$ excdump inspect <path-id>    # newest dump of one failure
-$ excdump gc                   # reclaim paths nothing hits any more
+$ uv run excdump list                 # what the store holds, grouped by failure
+$ uv run excdump inspect              # the most recent dump
+$ uv run excdump inspect <trace-id>   # a specific one; a unique prefix works
+$ uv run excdump inspect <path-id>    # newest dump of one failure
+$ uv run excdump gc                   # reclaim paths nothing hits any more
 ```
 
 `inspect` opens a `pdb`-like session over the dump. Frames, locals and globals

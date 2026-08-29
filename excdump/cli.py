@@ -209,11 +209,11 @@ class OfflinePdb:
 
 
 USAGE = """Usage:
-  python -m excdump inspect [<trace-id> | <path-id> | <file>] [--plain]
-  python -m excdump inspect --trace-id <trace-id>
-  python -m excdump list [<path-id>]
-  python -m excdump gc [<path-id>]
-  python -m excdump demo
+  python excdump inspect [<trace-id> | <path-id> | <file>] [--plain]
+  python excdump inspect --trace-id <trace-id>
+  python excdump list [<path-id>]
+  python excdump gc [<path-id>]
+  python excdump demo
 
 The trace id is the value returned by dump_exception() (and handed to the
 on_dump callback), so a logged id goes straight into the inspector. A unique
