@@ -6,6 +6,7 @@ to look at.
 """
 
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from typing import Dict, List, Optional, Tuple
 
 from .capture import dump_exception
@@ -14,6 +15,12 @@ from .model import ExceptionDump
 from .session import DebuggerSession
 from .store import DumpStore, resolve_dump
 from .loading import load_dump
+
+
+try:
+    __version__ = version("excdump")
+except PackageNotFoundError:  # pragma: no cover - only for an unpackaged checkout
+    __version__ = "unknown"
 
 
 COMMANDS: List[Tuple[str, Tuple[str, ...], str]] = [
@@ -209,6 +216,7 @@ class OfflinePdb:
 
 
 USAGE = """Usage:
+  python excdump --version
   python excdump inspect [<trace-id> | <path-id> | <file>] [--plain]
   python excdump inspect --trace-id <trace-id>
   python excdump list [<path-id>]
@@ -336,6 +344,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv
     args = argv[1:]
+    if "--version" in args or "-V" in args:
+        print(__version__)
+        return 0
     if "--pickle" in args:
         set_serializer("pickle")
     elif "--snapshot" in args:
